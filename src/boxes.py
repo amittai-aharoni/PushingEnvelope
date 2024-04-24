@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 import torch
 
 
@@ -8,8 +9,12 @@ class Boxes:
     offsets: torch.Tensor
 
     def intersect(self, others):
-        lower = torch.maximum(self.centers - self.offsets, others.centers - others.offsets)
-        upper = torch.minimum(self.centers + self.offsets, others.centers + others.offsets)
+        lower = torch.maximum(
+            self.centers - self.offsets, others.centers - others.offsets
+        )
+        upper = torch.minimum(
+            self.centers + self.offsets, others.centers + others.offsets
+        )
         centers = (lower + upper) / 2
         offsets = torch.abs(upper - lower) / 2
         return Boxes(centers, offsets), lower, upper

@@ -10,7 +10,7 @@ This implementation requires a working installation of PyTorch 1.12.0 (optionall
 
 To obtain the data, unzip `data.zip`:
 ```sh
-unzip data.zip
+unzip src/data.zip -d src/
 ```
 
 Our benchmark for subsumption prediction is included in the `prediction` subfolder of the folder of the relevant ontology, e.g., the data for GALEN can be found in `data/GALEN/prediction`. The data is split into training, validation and testing sets in the relevant subfolders, and we include `json` files that specify the mapping of classes and relations to integers used in the tensor-based representation.

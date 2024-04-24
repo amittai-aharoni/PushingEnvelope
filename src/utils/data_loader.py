@@ -16,12 +16,13 @@ class DataLoader(ABC):
 
     @staticmethod
     def from_task(task):
-        from utils.old_data_loader import OldDataLoader
-        from utils.inferences_data_loader import InferencesDataLoader
-        from utils.prediction_data_loader import PredictionDataLoader
+        from src.utils.inferences_data_loader import InferencesDataLoader
+        from src.utils.old_data_loader import OldDataLoader
+        from src.utils.prediction_data_loader import PredictionDataLoader
+
         task_to_data_loader = {
-            'old': OldDataLoader,
-            'inferences': InferencesDataLoader,
-            'prediction': PredictionDataLoader
+            "old": OldDataLoader,
+            "inferences": InferencesDataLoader,
+            "prediction": PredictionDataLoader,
         }
         return task_to_data_loader[task]()

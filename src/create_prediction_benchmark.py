@@ -1,25 +1,26 @@
 import json
 import os
+from typing import Optional
 
 import numpy as np
 
-from utils.data_loader import DataLoader
+from src.utils.data_loader import DataLoader
 
 
 class Split:
-    nf1: np.ndarray = None
-    nf2: np.ndarray = None
-    nf3: np.ndarray = None
-    nf4: np.ndarray = None
+    nf1: Optional[np.ndarray] = None
+    nf2: Optional[np.ndarray] = None
+    nf3: Optional[np.ndarray] = None
+    nf4: Optional[np.ndarray] = None
 
     def save(self, path):
         if not os.path.exists(path):
             os.makedirs(path)
         for i in range(1, 5):
-            file_path = f'{path}/nf{i}.npy'
-            arr = self.__getattribute__(f'nf{i}')
+            file_path = f"{path}/nf{i}.npy"
+            arr = self.__getattribute__(f"nf{i}")
             if arr is None:
-                raise ValueError('Tried to save uninitialised split')
+                raise ValueError("Tried to save uninitialised split")
             np.save(file_path, arr)
 
     def get_all_classes(self):
@@ -81,14 +82,14 @@ class Split:
         self.nf4 = self.nf4[mask]
 
 
-dataset = 'GALEN'
-data_loader = DataLoader.from_task('inferences')
+dataset = "GALEN"
+data_loader = DataLoader.from_task("inferences")
 data, classes, relations = data_loader.load_data(dataset)
 
-folder = f'data/{dataset}/prediction'
-with open(f'{folder}/classes.json', 'w+') as f:
+folder = f"data/{dataset}/prediction"
+with open(f"{folder}/classes.json", "w+") as f:
     json.dump(classes, f, indent=2)
-with open(f'{folder}/relations.json', 'w+') as f:
+with open(f"{folder}/relations.json", "w+") as f:
     json.dump(relations, f, indent=2)
 
 train_split = Split()
@@ -96,14 +97,14 @@ val_split = Split()
 test_split = Split()
 
 for i in range(1, 5):
-    nf = f'nf{i}'
+    nf = f"nf{i}"
     num = data[nf].shape[0]
     num_train = int(0.8 * num)
     num_val = int(0.1 * num)
     # data is already shuffled by inference_data_loader
     train = data[nf][:num_train]
-    val = data[nf][num_train:num_train + num_val]
-    test = data[nf][num_train + num_val:]
+    val = data[nf][num_train : num_train + num_val]
+    test = data[nf][num_train + num_val :]
     train_split.__setattr__(nf, train)
     val_split.__setattr__(nf, val)
     test_split.__setattr__(nf, test)
@@ -113,9 +114,9 @@ train_rels = train_split.get_all_relations()
 val_split.remove_axioms_not_in_set(train_classes, train_rels)
 test_split.remove_axioms_not_in_set(train_classes, train_rels)
 
-train_split.save(f'{folder}/train')
-val_split.save(f'{folder}/val')
-test_split.save(f'{folder}/test')
+train_split.save(f"{folder}/train")
+val_split.save(f"{folder}/val")
+test_split.save(f"{folder}/test")
 
-for key in ['disjoint', 'top', 'class_ids']:
-    np.save(f'{folder}/train/{key}.npy', data[key])
+for key in ["disjoint", "top", "class_ids"]:
+    np.save(f"{folder}/train/{key}.npy", data[key])
