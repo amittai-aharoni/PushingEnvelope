@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+**/.DS_Store
 
 # C extensions
 *.so
@@ -151,4 +152,3 @@ transe_result
 *.tsv
 *_kg.py
 all_output.txt
-

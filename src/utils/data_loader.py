@@ -1,17 +1,26 @@
 from abc import ABC, abstractmethod
+from typing import Dict, Tuple
+
+import torch
 
 
 class DataLoader(ABC):
     @abstractmethod
-    def load_data(self, dataset):
+    def load_data(
+        self, dataset: str
+    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, int], Dict[str, int]]:
         pass
 
     @abstractmethod
-    def load_val_data(self, dataset, classes):
+    def load_val_data(
+        self, dataset: str, classes: Dict[str, int]
+    ) -> Dict[str, torch.Tensor]:
         pass
 
     @abstractmethod
-    def load_test_data(self, dataset, classes):
+    def load_test_data(
+        self, dataset: str, classes: Dict[str, int]
+    ) -> Dict[str, torch.Tensor]:
         pass
 
     @staticmethod

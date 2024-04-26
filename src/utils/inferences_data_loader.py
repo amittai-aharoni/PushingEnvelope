@@ -1,8 +1,11 @@
 import json
+import os
+from typing import Dict
 
 import numpy as np
 import torch
 
+from src.config import DATA_PATH, ROOT_PATH
 from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device, memory
 
@@ -14,17 +17,22 @@ class InferencesDataLoader(DataLoader):
         self.load_data = memory.cache(self.load_data)
 
     @staticmethod
-    def get_file_dir(dataset):
-        return f"data/{dataset}/inferences/"
+    def get_file_dir(dataset: str) -> str:
+        path = os.path.join(ROOT_PATH, DATA_PATH, dataset, "inferences")
+        return path
 
-    def load_val_data(self, dataset, classes):
+    def load_val_data(
+        self, dataset: str, classes: Dict[str, int]
+    ) -> Dict[str, torch.Tensor]:
         with open(self.get_file_dir(dataset) + "val.json", "r") as f:
             data = json.load(f)
         return {
             "nf1": torch.tensor([(classes[tup[0]], classes[tup[1]]) for tup in data])
         }
 
-    def load_test_data(self, dataset, classes):
+    def load_test_data(
+        self, dataset: str, classes: Dict[str, int]
+    ) -> Dict[str, torch.Tensor]:
         with open(self.get_file_dir(dataset) + "inferences.json", "r") as f:
             data = json.load(f)
         return {

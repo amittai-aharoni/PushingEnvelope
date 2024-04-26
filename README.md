@@ -19,6 +19,20 @@ The data for the PPI prediction task can be found in the `PPI` subfolder. We aga
 
 The deductive reasoning benchmark data is contained in the `inferences` subfolder. It consists of the training data in form of the full OWL ontology, and validation and testing sets as `json` files.
 
+## Data Structure
+Each dataset folder contains the signature
+(found in `classes.json`, `relations.json`)
+and different assertions found in the test, train and val folders
+including
+- `top` assertion for the top concept (e.g. `Thing` in `GALEN`)
+- `role_chain` #TODO: figure out what this is
+- `nf1` asserts `C1 is subsumed by C2`
+- `nf2` asserts `C1 and C2 is subsumed by C3`
+- `nf3` asserts `C1 is submsumed by exists R.C2`
+- `nf4` asserts `exists R.C1 is subsumed by C2`
+- `disjoint` asserts `C1 is disjoint from C2`
+- `role_inclusion` asserts `R1 is subsumed by R2`
+
 ## Training
 
 In order to train Box<sup>2</sup>EL or one of the baseline methods, edit the file `train.py` (for subsumption prediction and deductive reasoning) or `train_ppi.py` (for PPI prediction) with the desired combination of method and dataset. For example, to run Box<sup>2</sup>EL for subsumption prediction on GALEN, you need to:
