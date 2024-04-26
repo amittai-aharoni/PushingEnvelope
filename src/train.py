@@ -6,19 +6,19 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import wandb
 from torch.optim.lr_scheduler import MultiStepLR
-import torch.nn as nn
 from tqdm import trange
 
 from src.config import (
     DATASETS,
     DEFAULT_DATASET,
-    PARAMS,
     DEFAULT_EPOCHS,
-    EMBEDDING_DIM,
     DEFAULT_NUM_NEG,
+    EMBEDDING_DIM,
+    PARAMS,
 )
 from src.evaluate import compute_ranks, evaluate
 from src.model.BoxSquaredEL import BoxSquaredEL
