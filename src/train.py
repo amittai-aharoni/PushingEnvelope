@@ -19,6 +19,7 @@ from src.config import (
     DEFAULT_NUM_NEG,
     EMBEDDING_DIM,
     PARAMS,
+    PROJECT_NAME,
 )
 from src.evaluate import compute_ranks, evaluate
 from src.model.BoxSquaredEL import BoxSquaredEL
@@ -51,7 +52,8 @@ def main():
             count=args.count,
         )
     else:
-        run(config=DATASETS[DEFAULT_DATASET]["prediction"], use_wandb=True)
+        default_dataset = DATASETS[DEFAULT_DATASET]
+        run(config=default_dataset.tasks["prediction"], use_wandb=True)
 
 
 def run(config: Optional[PARAMS], use_wandb: bool = True, split: str = "val"):
@@ -74,7 +76,7 @@ def run(config: Optional[PARAMS], use_wandb: bool = True, split: str = "val"):
         mode = "online" if use_wandb else "disabled"
         wandb.init(
             mode=mode,
-            project="BoxSquaredEL",
+            project=PROJECT_NAME,
             entity="mathiasj",
             config=config.to_wb_config(),
         )

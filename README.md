@@ -33,6 +33,8 @@ including
 - `disjoint` asserts `C1 is disjoint from C2`
 - `role_inclusion` asserts `R1 is subsumed by R2`
 
+Valuation data consists only of `nf1` assertions.
+
 ## Training
 
 In order to train Box<sup>2</sup>EL or one of the baseline methods, edit the file `train.py` (for subsumption prediction and deductive reasoning) or `train_ppi.py` (for PPI prediction) with the desired combination of method and dataset. For example, to run Box<sup>2</sup>EL for subsumption prediction on GALEN, you need to:

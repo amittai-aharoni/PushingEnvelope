@@ -4,6 +4,8 @@ from typing import Dict, Optional
 DATA_PATH = "data/"
 ROOT_PATH = os.path.dirname(os.path.abspath(__file__))
 
+PROJECT_NAME = "PushingEnvelope"
+
 DEFAULT_DATASET = "GALEN"
 DEFAULT_EPOCHS = 5000
 DEFAULT_NUM_NEG = 1

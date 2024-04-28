@@ -10,6 +10,7 @@ import wandb
 from torch.optim.lr_scheduler import MultiStepLR
 from tqdm import trange
 
+from src.config import PROJECT_NAME
 from src.evaluate_ppi import compute_ranks, evaluate
 from src.model.BoxSquaredEL import BoxSquaredEL
 from src.utils.ppi_data_loader import load_data, load_protein_data
@@ -37,7 +38,7 @@ def run(config=None, use_wandb=True, split="val"):
     else:
         num_epochs = 5000
         mode = "online" if use_wandb else "disabled"
-        wandb.init(mode=mode, project="BoxSquaredEL", entity="mathiasj", config=config)
+        wandb.init(mode=mode, project=PROJECT_NAME, entity="mathiasj", config=config)
     wandb.config["task"] = "ppi"
 
     device = get_device()

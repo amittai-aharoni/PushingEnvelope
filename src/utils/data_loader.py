@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Tuple
 
 import torch
+from torch.utils.data import DataLoader
 
 
 class DataLoader(ABC):
@@ -24,7 +25,10 @@ class DataLoader(ABC):
         pass
 
     @staticmethod
-    def from_task(task):
+    def from_task(task: str) -> DataLoader:
+        """
+        Factory method to create a DataLoader based on the task.
+        """
         from src.utils.inferences_data_loader import InferencesDataLoader
         from src.utils.old_data_loader import OldDataLoader
         from src.utils.prediction_data_loader import PredictionDataLoader
