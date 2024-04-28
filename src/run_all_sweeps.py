@@ -1,6 +1,7 @@
 import wandb
 
 from src.baseline_sweep import main
+from src.config import PROJECT_NAME
 
 baseline_config = {
     "method": "bayes",
@@ -56,7 +57,7 @@ for dataset in ["GALEN", "GO", "ANATOMY"]:
     config["parameters"]["dataset"]["value"] = dataset  # type: ignore
     config["parameters"]["task"]["value"] = task  # type: ignore
     config["parameters"]["model"]["value"] = model  # type: ignore
-    sweep_id = wandb.sweep(sweep=config, project="el-baselines")
+    sweep_id = wandb.sweep(sweep=config, project=PROJECT_NAME)
     print("Starting agent")
     wandb.agent(sweep_id, function=main)
     print(f"{model}-{dataset} sweep finished")

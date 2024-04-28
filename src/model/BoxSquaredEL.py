@@ -1,4 +1,5 @@
 import os
+from typing import Any, Generator
 
 import numpy as np
 import torch
@@ -12,18 +13,32 @@ from src.model.loaded_models import BoxSqELLoadedModel
 class BoxSquaredEL(nn.Module):
     def __init__(
         self,
-        device,
-        embedding_dim,
-        num_classes,
-        num_roles,
-        num_individuals=0,
-        margin=0,
-        neg_dist=2,
-        reg_factor=0.05,
-        num_neg=2,
-        batch_size=512,
-        vis_loss=False,
+        device: str,
+        embedding_dim: int,
+        num_classes: int,
+        num_roles: int,
+        num_individuals: int = 0,
+        margin: float = 0,
+        neg_dist: float = 2,
+        reg_factor: float = 0.5,
+        num_neg: int = 2,
+        batch_size: int = 512,
+        vis_loss: bool = False,
     ):
+        """
+        Args:
+            device: device to run the model on
+            embedding_dim: dimension of the embeddings
+            num_classes: number of classes
+            num_roles: number of roles
+            num_individuals: number of individuals
+            margin: margin for the loss
+            neg_dist: control how unlikely the negative samples are made by the model
+            reg_factor: a multiplier to prevent expressive role representation from overfitting
+            num_neg: number of negative samples we generate per nf3 sample
+            batch_size: batch size
+            vis_loss: whether to use the visualisation loss
+        """
         super(BoxSquaredEL, self).__init__()
 
         self.name = "boxsqel"
@@ -41,7 +56,11 @@ class BoxSquaredEL(nn.Module):
 
         self.negative_sampling = True
 
-        self.class_embeds = self.init_embeddings(self.num_classes, embedding_dim * 2)
+        # Embedding dimensions are doubled to store both the center and the offset
+        self.class_embeds = self.init_embeddings(
+            num_embeddings=self.num_classes, dim=embedding_dim * 2
+        )
+        # Individuals are represented as boxes with an offset/volume of 0 (i.e. the offset is a zero tensor)
         self.individual_embeds = self.init_embeddings(
             self.num_individuals, embedding_dim
         )
@@ -52,7 +71,24 @@ class BoxSquaredEL(nn.Module):
         self.relation_heads = self.init_embeddings(num_roles, embedding_dim * 2)
         self.relation_tails = self.init_embeddings(num_roles, embedding_dim * 2)
 
-    def init_embeddings(self, num_embeddings, dim, min=-1, max=1, normalise=True):
+    def init_embeddings(
+        self,
+        num_embeddings: int,
+        dim: int,
+        min: int = -1,
+        max: int = 1,
+        normalise: bool = True,
+    ) -> nn.Embedding:
+        """
+        Initialise embeddings with uniform distribution and normalise them.
+
+        Args:
+            num_embeddings: size of the dictionary of embeddings
+            dim: size of each embedding vector
+            min: minimum value of the uniform distribution
+            max: maximum value of the uniform distribution
+            normalise: whether to normalise the embeddings
+        """
         if num_embeddings == 0:
             return None
         embeddings = nn.Embedding(num_embeddings, dim)
@@ -63,13 +99,17 @@ class BoxSquaredEL(nn.Module):
             ).reshape(-1, 1)
         return embeddings
 
-    def get_boxes(self, embedding):
+    def get_boxes(self, embedding: torch.Tensor) -> Boxes:
         return Boxes(
+            # The first half of the embedding is the center
             embedding[:, : self.embedding_dim],
+            # The second half of the embedding is the offset
             torch.abs(embedding[:, self.embedding_dim :]),
         )
 
-    def get_class_boxes(self, nf_data, *indices):
+    def get_class_boxes(
+        self, nf_data: torch.Tensor, *indices: int
+    ) -> Generator[Boxes, Any, None]:
         return (self.get_boxes(self.class_embeds(nf_data[:, i])) for i in indices)
 
     def get_relation_boxes(self, nf_data, *indices):

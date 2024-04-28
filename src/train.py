@@ -1,15 +1,26 @@
 #!/usr/bin/env python
-import json
+import argparse
 import logging
 import sys
+from typing import Optional
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import wandb
 from torch.optim.lr_scheduler import MultiStepLR
 from tqdm import trange
 
+from src.config import (
+    DATASETS,
+    DEFAULT_DATASET,
+    DEFAULT_EPOCHS,
+    DEFAULT_NUM_NEG,
+    EMBEDDING_DIM,
+    PARAMS,
+    PROJECT_NAME,
+)
 from src.evaluate import compute_ranks, evaluate
 from src.model.BoxSquaredEL import BoxSquaredEL
 from src.utils.data_loader import DataLoader
@@ -19,32 +30,59 @@ logging.basicConfig(level=logging.INFO)
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Run a sweep.")
+    parser.add_argument(
+        "--sweep_id", type=str, help="The sweep id to run the agent on.", default=None
+    )
+    parser.add_argument(
+        "--count",
+        type=int,
+        help="The number of runs to execute. If None, will run all runs.",
+        default=None,
+    )
+    args = parser.parse_args()
+
     torch.manual_seed(42)
     np.random.seed(12)
-    if len(sys.argv) > 1:
-        sweep_id = sys.argv[1]
-        count = None if len(sys.argv) <= 2 else sys.argv[2]
-        print(count)
+
+    if args.sweep_id is not None:
         wandb.agent(
-            sweep_id=f"mathiasj/el-baselines/{sweep_id}", function=run, count=count
+            sweep_id=f"mathiasj/el-baselines/{args.sweep_id}",
+            function=run,
+            count=args.count,
         )
     else:
-        with open("configs.json", "r") as f:
-            configs = json.load(f)
-        run(config=configs["GALEN"]["prediction"], use_wandb=True)
+        default_dataset = DATASETS[DEFAULT_DATASET]
+        run(config=default_dataset.tasks["prediction"], use_wandb=True)
 
 
-def run(config=None, use_wandb=True, split="val"):
+def run(config: Optional[PARAMS], use_wandb: bool = True, split: str = "val"):
+    """
+    Initializes the Weights and Biases environment, loads the data,
+    initializes the model and optimizer, and trains the model.
+    Args:
+        config:
+        use_wandb:
+        split:
+
+    Returns:
+
+    """
     if config is None:  # running a sweep
-        num_epochs = 5000
+        num_epochs = DEFAULT_EPOCHS
         wandb.init()
     else:
-        num_epochs = 5000 if "epochs" not in config else config["epochs"]
+        num_epochs = config.epochs
         mode = "online" if use_wandb else "disabled"
-        wandb.init(mode=mode, project="BoxSquaredEL", entity="mathiasj", config=config)
+        wandb.init(
+            mode=mode,
+            project=PROJECT_NAME,
+            entity="mathiasj",
+            config=config.to_wb_config(),
+        )
 
-    embedding_dim = 200
-    num_neg = wandb.config.num_neg if "num_neg" in wandb.config else 1
+    embedding_dim = EMBEDDING_DIM
+    num_neg = wandb.config.num_neg if "num_neg" in wandb.config else DEFAULT_NUM_NEG
     dataset = wandb.config.dataset
     task = wandb.config.task
 
@@ -54,6 +92,7 @@ def run(config=None, use_wandb=True, split="val"):
     val_data = data_loader.load_val_data(dataset, classes)
     val_data["nf1"] = val_data["nf1"][:1000]
     print("Loaded data.")
+    # TODO: Clean up model initialization
     # model = Elem(device, classes, len(relations), embedding_dim, margin=0.00)
     # model = EmELpp(device, classes, len(relations), embedding_dim, margin=0.05)
     # model = Elbe(device, classes, len(relations), embedding_dim, margin=0.05)
@@ -121,7 +160,7 @@ def run(config=None, use_wandb=True, split="val"):
 
 
 def train(
-    model,
+    model: nn.Module,
     data,
     val_data,
     num_classes,
