@@ -4,7 +4,23 @@ This repository is the official implementation of the paper [Dual Box Embeddings
 
 ## Requirements
 
-This implementation requires a working installation of PyTorch 1.12.0 (optionally with GPU support for faster training and inference). You will additionally need the following Python packages: `joblib==1.1.0`, `numpy==1.22.3`, `tqdm==4.64.0`, `wandb==0.13.9`.
+Make sure you have `make` and `poetry` installed.
+If not, you can install them using the following commands:
+```sh
+sudo apt-get install make
+pip install poetry
+```
+
+To install the required packages, run:
+```sh
+make
+make install
+```
+
+You would also need to setup a wandb account and run
+`wandb login` to log the results.
+The project name is configured in `config.py` under
+`PROJECT_NAME`.
 
 ## Data
 
