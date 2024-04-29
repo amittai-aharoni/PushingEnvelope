@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import logging
+import os
 import sys
 from typing import Optional
 
@@ -47,7 +48,7 @@ def main():
 
     if args.sweep_id is not None:
         wandb.agent(
-            sweep_id=f"mathiasj/el-baselines/{args.sweep_id}",
+            # sweep_id=f"mathiasj/el-baselines/{args.sweep_id}",
             function=run,
             count=args.count,
         )
@@ -73,11 +74,12 @@ def run(config: Optional[PARAMS], use_wandb: bool = True, split: str = "val"):
         wandb.init()
     else:
         num_epochs = config.epochs
+        entity = os.getenv("WANDB_ENTITY_NAME")
         mode = "online" if use_wandb else "disabled"
         wandb.init(
             mode=mode,
             project=PROJECT_NAME,
-            entity="mathiasj",
+            entity=entity,
             config=config.to_wb_config(),
         )
 
