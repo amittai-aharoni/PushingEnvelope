@@ -19,8 +19,8 @@ make install
 
 You would also need to setup a wandb account and run
 `wandb login` to log the results.
-The project name is configured in `config.py` under
-`PROJECT_NAME`.
+The project name and entity name is configured in `config.py` under
+`PROJECT_NAME` and `ENTITY_NAME` respectively.
 
 ## Data
 

@@ -1,13 +1,14 @@
 DEV := $(shell grep -oP '^DEV=\K.*' .env)
 
 install:
-ifeq ($(DEV),True)
-	poetry install
-	pre-commit install
-	mypy --install-types
-else
-	poetry install --no-dev
-endif
+	cp .env.example .env
+	ifeq ($(DEV),True)
+		poetry install
+		pre-commit install
+		mypy --install-types
+	else
+		poetry install --no-dev
+	endif
 
 format:
 	black src/

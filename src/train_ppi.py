@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import json
 import logging
+import os
 import sys
 
 import numpy as np
@@ -38,7 +39,8 @@ def run(config=None, use_wandb=True, split="val"):
     else:
         num_epochs = 5000
         mode = "online" if use_wandb else "disabled"
-        wandb.init(mode=mode, project=PROJECT_NAME, entity="mathiasj", config=config)
+        entity = os.getenv("WANDB_ENTITY_NAME")
+        wandb.init(mode=mode, project=PROJECT_NAME, entity=entity, config=config)
     wandb.config["task"] = "ppi"
 
     device = get_device()
