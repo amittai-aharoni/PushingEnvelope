@@ -1,21 +1,34 @@
-from typing import List
-
 import torch
+
+from typing import List
+from mpmath import mp
+
+mp.dps = 50  # set the precision
 
 
 class Box:
     # a box
+    center: torch.Tensor
+    offsets: torch.Tensor
     lower: torch.Tensor
     upper: torch.Tensor
 
-    def __init__(self, lower, upper):
-        self.lower = lower
-        self.upper = upper
+    def __init__(self, center=None, offsets=None, lower=None, upper=None):
+        if lower is None and upper is None:
+            self.center = center
+            self.offsets = offsets
+            self.lower = center - offsets
+            self.upper = center + offsets
+        if center is None and offsets is None:
+            self.lower = lower
+            self.upper = upper
+            self.center = (lower + upper) / 2
+            self.offsets = (upper - lower) / 2
 
     def intersect(self, other):
         lower = torch.maximum(self.lower, other.lower)
         upper = torch.minimum(self.upper, other.upper)
-        return Box(lower, upper)
+        return Box(lower=lower, upper=upper)
 
     def arbitrary_intersection(self, other: list):
         lower = self.lower
@@ -23,15 +36,69 @@ class Box:
         for o in other:
             lower = torch.maximum(lower, o.lower)
             upper = torch.minimum(upper, o.upper)
-        return Box(lower, upper)
+        return Box(lower=lower, upper=upper)
 
     def is_empty(self):
         return torch.any(self.lower > self.upper)
 
+    # def area(self):
+    #     if self.is_empty():
+    #         return 0.
+    #     delta = self.upper - self.lower
+    #     # convert to mp.mpf to get higher precision
+    #     delta = [mp.mpf(d.item()) for d in delta]
+    #     area = mp.fprod(delta)
+    #     return area
+
     def area(self):
         if self.is_empty():
-            return 0
-        return torch.prod(self.upper - self.lower)
+            return torch.tensor(0.0)
+        delta = self.upper - self.lower
+        area = torch.prod(delta)
+        return area
+
+    def log_area(self):
+        if self.is_empty():
+            return 0.0
+        delta = self.upper - self.lower
+        log_prod = torch.sum(torch.log(delta))
+        return log_prod
+
+    def concat(self, other):
+        """
+        Create a new box that contains both boxes
+        """
+        center = torch.cat((self.center, other.center))
+        offsets = torch.cat((self.offsets, other.offsets))
+        return Box(center=center, offsets=offsets)
+
+    def project1(self, dim=None):
+        """
+        Project the box to the first half of the dimensions
+        """
+        if dim is None:
+            dim = int(len(self.center) / 2)
+        center = self.center[:dim]
+        offsets = self.offsets[:dim]
+        return Box(center=center, offsets=offsets)
+
+    def project2(self, dim=None):
+        """
+        Project the box to the second half of the dimensions
+        """
+        if dim is None:
+            dim = int(len(self.center) / 2)
+        center = self.center[dim:]
+        offsets = self.offsets[dim:]
+        return Box(center=center, offsets=offsets)
+
+    @staticmethod
+    def top_box(dim=int):
+        """
+        Returns a box that covers the entire space
+        by having center at the origin and offsets of infinity
+        """
+        return Box(center=torch.zeros(dim), offsets=torch.full((dim,), float("inf")))
 
 
 class Multibox:
@@ -49,7 +116,7 @@ class Multibox:
         new_boxes = []
         for box in self.boxes:
             for other in others.boxes:
-                intersection, _, _ = box.intersect(other)
+                intersection = box.intersect(other)
                 # if the intersection is not empty
                 if not intersection.is_empty():
                     new_boxes.append(intersection)
@@ -69,7 +136,7 @@ class Multibox:
         """
         area = 0
         if len(self.boxes) == 0:
-            return 0
+            return 0.0
         if len(self.boxes) == 1:
             return self.boxes[0].area()
         index_powerset = self.index_power_set()
@@ -83,4 +150,32 @@ class Multibox:
             for i in range(1, len(indices)):
                 intersection = intersection.intersect(self.boxes[indices[i]])
             area += (-1) ** (len(indices) + 1) * intersection.area()
+        # area = self.scale_area(area)
         return area
+
+    def scale_area(self, area):
+        # Scale the number
+        scaled_num_mpf = area * mp.power(10, 318)
+        # Convert the scaled number back to a PyTorch tensor
+        scaled_num_tensor = torch.tensor(float(scaled_num_mpf), dtype=torch.float64)
+        return scaled_num_tensor
+
+    def project1(self, dim=None):
+        """
+        Project the multibox to the first half of the dimensions
+        """
+        return Multibox([box.project1(dim) for box in self.boxes])
+
+    def project2(self, dim=None):
+        """
+        Project the multibox to the second half of the dimensions
+        """
+        return Multibox([box.project2(dim) for box in self.boxes])
+
+    def concat(self, other):
+        """
+        Create a new multibox that contains both multiboxes
+        """
+        return Multibox(
+            [box1.concat(box2) for box1, box2 in zip(self.boxes, other.boxes)]
+        )

@@ -71,6 +71,35 @@ class BoxSqELLoadedModel(LoadedModel):
         return model
 
 
+class MultiBoxELLoadedModel(LoadedModel):
+    class_embeds: torch.Tensor
+    individual_embeds: torch.Tensor
+    relation_embeds: torch.Tensor
+
+    def is_translational(self):
+        return False
+
+    @staticmethod
+    def load(folder, embedding_size, device, best=False):
+        model = MultiBoxELLoadedModel()
+        model.embedding_size = embedding_size
+        suffix = "_best" if best else ""
+        model.class_embeds = torch.from_numpy(
+            np.load(f"{folder}/class_embeds{suffix}.npy")
+        ).to(device)
+        model.relation_embeds = torch.from_numpy(
+            np.load(f"{folder}/relations{suffix}.npy")
+        ).to(device)
+        if os.path.exists(f"{folder}/individual_embeds{suffix}.npy"):
+            model.individual_embeds = torch.from_numpy(
+                np.load(f"{folder}/individual_embeds{suffix}.npy")
+            ).to(device)
+            model.individual_bumps = torch.from_numpy(
+                np.load(f"{folder}/individual_bumps{suffix}.npy")
+            ).to(device)
+        return model
+
+
 class ElbeLoadedModel(LoadedModel):
     class_embeds: torch.Tensor
     relation_embeds: torch.Tensor

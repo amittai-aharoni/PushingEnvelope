@@ -23,7 +23,9 @@ from src.config import (
     PROJECT_NAME,
 )
 from src.evaluate import compute_ranks, evaluate
-from src.model.BoxSquaredEL import BoxSquaredEL
+
+# from src.model.BoxSquaredEL import BoxSquaredEL
+from src.model.MultiBoxEL import MultiBoxEL
 from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device
 
@@ -102,11 +104,22 @@ def run(config: Optional[PARAMS], use_wandb: bool = True, split: str = "val"):
     # model = AblationModel(device, embedding_dim, len(classes), len(relations),
     # margin=wandb.config.margin, neg_dist=wandb.config.neg_dist,
     # num_neg=num_neg)
-    model = BoxSquaredEL(
+    # model = BoxSquaredEL(
+    #     device,
+    #     embedding_dim,
+    #     len(classes),
+    #     len(relations),
+    #     margin=wandb.config.margin,
+    #     neg_dist=wandb.config.neg_dist,
+    #     reg_factor=wandb.config.reg_factor,
+    #     num_neg=num_neg,
+    # )
+    model = MultiBoxEL(
         device,
-        embedding_dim,
+        embedding_dim * 2,
         len(classes),
-        len(relations),
+        num_boxes_per_class=4,
+        num_roles=len(relations),
         margin=wandb.config.margin,
         neg_dist=wandb.config.neg_dist,
         reg_factor=wandb.config.reg_factor,
