@@ -110,6 +110,16 @@ class BoxSquaredEL(nn.Module):
     def get_class_boxes(
         self, nf_data: torch.Tensor, *indices: int
     ) -> Generator[Boxes, Any, None]:
+        """
+        Returns a representation of classes as boxes.
+
+        Args:
+            nf_data: the data
+            indices: indices of the classes
+
+        Returns:
+            a tuple of Boxes
+        """
         return (self.get_boxes(self.class_embeds(nf_data[:, i])) for i in indices)
 
     def get_relation_boxes(self, nf_data, *indices):
