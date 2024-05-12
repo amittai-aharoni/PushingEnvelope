@@ -98,7 +98,16 @@ class Box:
         Returns a box that covers the entire space
         by having center at the origin and offsets of infinity
         """
-        return Box(center=torch.zeros(dim), offsets=torch.full((dim,), float("inf")))
+        zeros = torch.zeros(dim)
+        inf = torch.full((dim,), float("inf"))
+        return Box(center=zeros, offsets=inf)
+
+    def to(self, device):
+        self.center = self.center.to(device)
+        self.offsets = self.offsets.to(device)
+        self.lower = self.lower.to(device)
+        self.upper = self.upper.to(device)
+        return self
 
 
 class Multibox:

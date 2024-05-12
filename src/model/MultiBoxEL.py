@@ -254,6 +254,7 @@ class MultiBoxEL(nn.Module):
         r_multiboxes = [role for role in r_multiboxes]
         existential_multiboxes = []
         top = Box.top_box(dim=len(d_multiboxes[0].boxes[0].center))
+        top = top.to(self.device)
         for r_multibox, d_multibox in zip(r_multiboxes, d_multiboxes):
             pre_image_d_multibox = Multibox([top.concat(d) for d in d_multibox.boxes])
             intersection = r_multibox.intersect(pre_image_d_multibox)
@@ -314,6 +315,7 @@ class MultiBoxEL(nn.Module):
         r_multiboxes = self.get_relation_multiboxes(nf4_data, 0)
         existential_multiboxes = []
         top = Box.top_box(dim=len(d_multiboxes[0].boxes[0].center))
+        top = top.to(self.device)
         for r_multibox, c_multibox in zip(r_multiboxes, c_multiboxes):
             pre_image_c_multibox = Multibox([top.concat(c) for c in c_multibox.boxes])
             intersection = r_multibox.intersect(pre_image_c_multibox)
