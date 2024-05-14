@@ -29,6 +29,7 @@ class LoadedModel(ABC):
             "elem": ElbeLoadedModel,
             "EmELpp": ElbeLoadedModel,
             "boxel": BoxELLoadedModel,
+            "multiboxel": MultiBoxELLoadedModel,
         }
         return model_dict[name].load(folder, embedding_size, device, best)
 

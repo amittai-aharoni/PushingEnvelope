@@ -105,7 +105,17 @@ class MultiBoxEL(nn.Module):
             )
         embeddings = nn.Embedding(num_embeddings, dim * num_boxes_per_class)
         embeddings.weight.requires_grad = True  # Set requires_grad to True
-        nn.init.uniform_(embeddings.weight, a=min, b=max)
+        # nn.init.uniform_(embeddings.weight, a=min, b=max)
+        # Initialize embeddings
+        for i in range(num_boxes_per_class):
+            nn.init.uniform_(
+                embeddings.weight[:, i * dim : i * dim + dim // 2], a=min, b=max
+            )
+            nn.init.normal_(
+                embeddings.weight[:, i * dim + dim // 2 : (i + 1) * dim],
+                mean=1,
+                std=0.333,
+            ).data.clamp(min=0, max=2)
         if normalise:
             embeddings.weight.data /= torch.linalg.norm(
                 embeddings.weight.data, axis=1
@@ -168,17 +178,19 @@ class MultiBoxEL(nn.Module):
             intersection = multibox1.intersect(multibox2)
             multibox1_area = multibox1.area()
             if multibox1_area == 0:
-                loses.append(torch.tensor(0.0))
+                loses.append(torch.tensor(0.0).to(self.device))
                 continue
             if multibox1_area == float("inf"):
                 loses.append(
                     torch.tensor(
                         1 - intersection.area() / (2 * EMBEDDING_BOUND),
                         dtype=torch.float64,
-                    )
+                    ).to(self.device)
                 )
                 continue
-            loses.append(1 - intersection.area() / multibox1_area)
+            loses.append(
+                torch.tensor(1 - intersection.area() / multibox1_area).to(self.device)
+            )
             incrementor += 1
         loses = torch.stack(loses)
         dist = torch.reshape(torch.linalg.norm(relu(loses)), [-1, 1])
