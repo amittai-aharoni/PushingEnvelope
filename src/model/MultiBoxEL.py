@@ -115,7 +115,7 @@ class MultiBoxEL(nn.Module):
                 embeddings.weight[:, i * dim + dim // 2 : (i + 1) * dim],
                 mean=1,
                 std=0.333,
-            ).data.clamp(min=0, max=2)
+            )
         if normalise:
             embeddings.weight.data /= torch.linalg.norm(
                 embeddings.weight.data, axis=1
