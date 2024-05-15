@@ -73,7 +73,7 @@ class MultiBoxEL(nn.Module):
         self.relation_embeds = self.init_embeddings(
             num_embeddings=self.num_roles,
             dim=embedding_dim * 2,
-            num_boxes_per_class=num_boxes_per_class,
+            num_boxes_per_class=1,
         )
 
     def init_embeddings(

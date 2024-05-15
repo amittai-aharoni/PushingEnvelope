@@ -93,8 +93,8 @@ def test_area():
     """
     boxes = []
     for i in range(4):
-        center = torch.empty(50).uniform_(-1, 1)
-        offset = torch.empty(50).uniform_(-1, 1)
+        center = torch.empty(3000).uniform_(0, 0.2)
+        offset = torch.empty(3000).normal_(mean=0.5, std=0.1673)
         boxes.append(Box(center=center, offsets=torch.abs(offset)))
     multibox = Multibox(boxes)
     area = multibox.area()
