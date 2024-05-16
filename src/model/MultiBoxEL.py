@@ -73,7 +73,7 @@ class MultiBoxEL(nn.Module):
         self.relation_embeds = self.init_embeddings(
             num_embeddings=self.num_roles,
             dim=embedding_dim * 2,
-            num_boxes_per_class=1,
+            num_boxes_per_class=num_boxes_per_class,
         )
 
     def init_embeddings(
@@ -113,8 +113,8 @@ class MultiBoxEL(nn.Module):
             )
             nn.init.normal_(
                 embeddings.weight[:, i * dim + dim // 2 : (i + 1) * dim],
-                mean=1,
-                std=0.333,
+                mean=0.5,
+                std=0.1673,
             )
         if normalise:
             embeddings.weight.data /= torch.linalg.norm(
@@ -372,25 +372,20 @@ class MultiBoxEL(nn.Module):
         return neg_data.to(self.device)
 
     def forward(self, train_data):
-        loss = 0
-
-        nf1_data = self.get_data_batch(train_data, "nf1")
-        loss += self.nf1_loss(nf1_data).square().mean()
-
-        if len(train_data["nf2"]) > 0:
-            nf2_data = self.get_data_batch(train_data, "nf2")
-            loss += self.nf2_loss(nf2_data).square().mean()
-
-        nf3_data = self.get_data_batch(train_data, "nf3")
-        loss += self.nf3_loss(nf3_data).square().mean()
-
-        if len(train_data["nf4"]) > 0:
-            nf4_data = self.get_data_batch(train_data, "nf4")
-            loss += self.nf4_loss(nf4_data).square().mean()
-
-        if len(train_data["disjoint"]) > 0:
-            disjoint_data = self.get_data_batch(train_data, "disjoint")
-            loss += self.nf2_disjoint_loss(disjoint_data).square().mean()
+        loss = torch.tensor(0.0, requires_grad=True).to(self.device)
+        nfi_methods = {
+            "nf1": self.nf1_loss,
+            "nf2": self.nf2_loss,
+            "nf3": self.nf3_loss,
+            "nf4": self.nf4_loss,
+            "disjoint": self.nf2_disjoint_loss,
+        }
+        for nfi, method in nfi_methods.items():
+            if len(train_data[nfi]) > 0:
+                nfi_data = self.get_data_batch(train_data, nfi)
+                nfi_loss = method(nfi_data).square().mean()
+                print(f"{nfi} loss: {nfi_loss}")
+                loss = loss + nfi_loss
 
         # if self.num_neg > 0:
         #     neg_data = self.get_negative_sample_batch(train_data, "nf3_neg")
@@ -402,7 +397,9 @@ class MultiBoxEL(nn.Module):
         if "abox" in train_data:
             abox = train_data["abox"]
             ra_data = self.get_data_batch(abox, "role_assertions")
-            loss += self.role_assertion_loss(ra_data).square().mean()
+            assertion_loss = self.role_assertion_loss(ra_data).square().mean()
+            print(f"Role assertion loss: {assertion_loss}")
+            loss = loss + assertion_loss
 
             # neg_data = self.get_negative_sample_batch(abox, "role_assertions_neg")
             # neg_loss1, neg_loss2 = self.role_assertion_neg_loss(neg_data)
@@ -411,14 +408,21 @@ class MultiBoxEL(nn.Module):
             # ).square().mean()
 
             ca_data = self.get_data_batch(abox, "concept_assertions")
-            loss += self.concept_assertion_loss(ca_data).square().mean()
+            concept_assertion_loss = (
+                self.concept_assertion_loss(ca_data).square().mean()
+            )
+            print(f"Concept assertion loss: {concept_assertion_loss}")
+            loss = loss + concept_assertion_loss
 
-        if "role_inclusion" in train_data:
+        if "role_inclusion" in train_data and len(train_data["role_inclusion"]) > 0:
             ri_data = self.get_data_batch(train_data, "role_inclusion")
-            loss += self.role_inclusion_loss(ri_data).square().mean()
-        if "role_chain" in train_data:
+            role_inclusion_loss = self.role_inclusion_loss(ri_data).square().mean()
+            print(f"Role inclusion loss: {role_inclusion_loss}")
+            loss = loss + role_inclusion_loss
+        if "role_chain" in train_data and len(train_data["role_chain"]) > 0:
             rc_data = self.get_data_batch(train_data, "role_chain")
-            loss += self.role_chain_loss(rc_data).square().mean()
+            role_chain_loss = self.role_chain_loss(rc_data).square().mean()
+            print(f"Role chain loss: {role_chain_loss}")
 
         # class_reg = (
         #     self.reg_factor

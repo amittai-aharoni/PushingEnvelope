@@ -152,3 +152,4 @@ transe_result
 *.tsv
 *_kg.py
 all_output.txt
+ Miniconda3-latest-MacOSX-arm64.sh

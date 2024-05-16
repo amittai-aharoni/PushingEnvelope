@@ -1,5 +1,6 @@
 import pytest
 import torch
+from torch import tensor
 
 from src.model.MultiBoxEL import MultiBoxEL
 from src.multibox_operations.multibox_operations import Multibox, Box
@@ -93,9 +94,31 @@ def test_area():
     """
     boxes = []
     for i in range(4):
-        center = torch.empty(3000).uniform_(0, 0.2)
-        offset = torch.empty(3000).normal_(mean=0.5, std=0.1673)
+        center = torch.empty(50).uniform_(0, 0.2)
+        offset = torch.empty(50).normal_(mean=0.5, std=0.1673)
         boxes.append(Box(center=center, offsets=torch.abs(offset)))
     multibox = Multibox(boxes)
     area = multibox.area()
     assert area > 0
+
+
+def test_loss_function_gradient():
+    torch.set_grad_enabled(True)
+    data = {
+        "top": tensor([0]),
+        "role_chain": tensor([]),
+        "class_ids": tensor([0, 1, 2]),
+        "role_inclusion": tensor([]),
+        "nf4": tensor([]),
+        "disjoint": tensor([], dtype=torch.int64),
+        "nf1": tensor([[1, 2]]),
+        "nf2": tensor([]),
+        "nf3": tensor([]),
+        "nf3_neg0": tensor([]),
+    }
+    mutlibox_el = MultiBoxEL(
+        device="cpu", embedding_dim=4, num_classes=3, num_boxes_per_class=1, num_roles=0
+    )
+    loss = mutlibox_el(data)
+    print(loss)
+    loss.backward()

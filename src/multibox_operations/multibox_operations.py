@@ -53,8 +53,7 @@ class Box:
     def area(self):
         if self.is_empty():
             return torch.tensor(0.0)
-        delta = self.upper - self.lower
-        area = torch.prod(delta)
+        area = torch.prod(self.offsets * 2)
         return area
 
     def log_area(self):
