@@ -25,7 +25,7 @@ from src.config import (
 from src.evaluate import compute_ranks, evaluate
 
 # from src.model.BoxSquaredEL import BoxSquaredEL
-from src.model.MultiBoxEL import MultiBoxEL
+from src.model.MultiBoxEL2 import MultiBoxEL
 from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device
 
