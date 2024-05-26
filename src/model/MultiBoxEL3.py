@@ -184,29 +184,38 @@ class MultiBoxEL(nn.Module):
         """
         multiboxes1.to(self.device)
         multiboxes2.to(self.device)
-        multiboxes1_area = Multiboxes.area(multiboxes1, self.device)
-        intersection = Multiboxes.intersect(
+        soft_includes = Multiboxes.monte_carlo_area(
             multiboxes1, multiboxes2, device=self.device
         )
-        intersection_area = Multiboxes.area(intersection, device=self.device)
-        ones = torch.ones_like(intersection_area)
-        loses = ones - intersection_area / multiboxes1_area
-        dist = torch.reshape(torch.mean(relu(loses)), [-1, 1])
-        dist = dist.squeeze()
-        return dist
+        multibox1_points = torch.gt(soft_includes[0], 0.5).sum(dim=0)
+        intersection = (
+            torch.stack([soft_includes[0], soft_includes[1]], dim=2).min(dim=2).values
+        )
+        intersection_points = torch.gt(intersection, 0.5).sum(dim=0)
+
+        loss = (intersection_points / multibox1_points).mean()
+        loss = torch.reshape(relu(loss), [-1, 1])
+        return loss
 
     def disjoint_loss(self, multiboxes1: Multiboxes, multiboxes2: Multiboxes):
         """
         Compute 1 - Area(B1 cup B2) / Area(B1) + Area(B2)
         """
-        multiboxes1_area = Multiboxes.area(multiboxes1, device=self.device)
-        multiboxes2_area = Multiboxes.area(multiboxes2, device=self.device)
-        union = Multiboxes.union(multiboxes1, multiboxes2)
-        union_area = Multiboxes.area(union, device=self.device)
-        ones = torch.ones_like(union_area)
-        loses = ones - union_area / (multiboxes1_area + multiboxes2_area)
-        dist = torch.reshape(torch.linalg.norm(relu(loses)), [-1, 1])
-        return dist
+        multiboxes1.to(self.device)
+        multiboxes2.to(self.device)
+        soft_includes = Multiboxes.monte_carlo_area(
+            multiboxes1, multiboxes2, device=self.device
+        )
+        multibox1_points = torch.gt(soft_includes[0], 0.5).sum(dim=0)
+        multibox2_points = torch.gt(soft_includes[1], 0.5).sum(dim=0)
+        union = (
+            torch.stack([soft_includes[0], soft_includes[1]], dim=2).max(dim=2).values
+        )
+        union_points = torch.gt(union, 0.5).sum(dim=0)
+
+        loss = (union_points / (multibox1_points + multibox2_points)).mean()
+        loss = torch.reshape(relu(loss), [-1, 1])
+        return loss
 
     def neg_loss(self, boxes1, boxes2):
         diffs = torch.abs(boxes1.centers - boxes2.centers)

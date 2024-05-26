@@ -21,11 +21,12 @@ from src.config import (
     EMBEDDING_DIM,
     PARAMS,
     PROJECT_NAME,
+    NUM_BOXES_PER_CLASS,
 )
 from src.evaluate import compute_ranks, evaluate
 
 # from src.model.BoxSquaredEL import BoxSquaredEL
-from src.model.MultiBoxEL2 import MultiBoxEL
+from src.model.MultiBoxEL3 import MultiBoxEL
 from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device
 
@@ -118,12 +119,13 @@ def run(config: Optional[PARAMS], use_wandb: bool = True, split: str = "val"):
         device,
         embedding_dim * 2,
         len(classes),
-        num_boxes_per_class=4,
+        num_boxes_per_class=NUM_BOXES_PER_CLASS,
         num_roles=len(relations),
         margin=wandb.config.margin,
         neg_dist=wandb.config.neg_dist,
         reg_factor=wandb.config.reg_factor,
         num_neg=num_neg,
+        wandb=wandb,
     )
     wandb.config["model"] = model.name
 
@@ -199,7 +201,6 @@ def train(
         for epoch in trange(num_epochs):
             if model.negative_sampling:
                 sample_negatives(data, num_neg)
-
             loss = model(data)
             if epoch % val_freq == 0 and val_data is not None:
                 ranking = compute_ranks(
@@ -223,6 +224,7 @@ def train(
                     # best_mean = np.mean(ranking.ranks)
                     best_epoch = epoch
                     model.save(out_folder, best=True)
+
             wandb.log({"loss": loss})
 
             optimizer.zero_grad()
