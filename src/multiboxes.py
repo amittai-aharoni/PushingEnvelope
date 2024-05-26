@@ -40,7 +40,7 @@ class Multiboxes:
             diff = max - min
             result = ~(diff < 0).any(dim=2)
             # Get the sorting indices
-            _, indices = torch.sort(result, dim=1, descending=True)
+            _, indices = torch.sort(result.float(), dim=1, descending=True)
             # Use the indices to sort max, min, and result
             max_sorted = max.gather(1, indices.unsqueeze(-1).expand_as(max))
             min_sorted = min.gather(1, indices.unsqueeze(-1).expand_as(min))
