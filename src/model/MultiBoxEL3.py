@@ -193,7 +193,7 @@ class MultiBoxEL(nn.Module):
         )
         intersection_points = torch.gt(intersection, 0.5).sum(dim=0)
 
-        loss = (intersection_points / multibox1_points).mean()
+        loss = 1 - (intersection_points / multibox1_points).mean()
         loss = torch.reshape(relu(loss), [-1, 1])
         return loss
 
@@ -213,7 +213,7 @@ class MultiBoxEL(nn.Module):
         )
         union_points = torch.gt(union, 0.5).sum(dim=0)
 
-        loss = (union_points / (multibox1_points + multibox2_points)).mean()
+        loss = 1 - (union_points / (multibox1_points + multibox2_points)).mean()
         loss = torch.reshape(relu(loss), [-1, 1])
         return loss
 

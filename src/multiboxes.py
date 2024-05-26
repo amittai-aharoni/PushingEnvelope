@@ -181,16 +181,15 @@ class Multiboxes:
         dim = multiboxes1.min.shape[2]
         minimum_value = torch.min(
             multiboxes1.min.min(dim=1).values, multiboxes2.min.min(dim=1).values
-        ).min()
+        )
         maximum_value = torch.max(
             multiboxes1.max.max(dim=1).values, multiboxes2.max.max(dim=1).values
-        ).max()
-
-        random_points = (
-            torch.rand(n, dim).to(device) * (maximum_value - minimum_value)
-            + minimum_value
         )
-        random_points_unsqueezed = random_points.unsqueeze(1).unsqueeze(2)
+
+        random_points = torch.rand(batch_size, n, dim).to(device) * (
+            maximum_value.unsqueeze(1) - minimum_value.unsqueeze(1)
+        ) + minimum_value.unsqueeze(1)
+        random_points_unsqueezed = random_points.unsqueeze(2)
         random_points_unsqueezed = random_points_unsqueezed.to(device)
 
         multiboxes = [
@@ -210,13 +209,13 @@ class Multiboxes:
             multibox = multiboxes[i]
             multibox_min_expanded = (
                 multibox["min"]
-                .unsqueeze(0)
-                .expand(n, batch_size, multibox["boxes_amount"], dim)
+                .unsqueeze(1)
+                .expand(batch_size, n, multibox["boxes_amount"], dim)
             )
             multibox_max_expanded = (
                 multibox["max"]
-                .unsqueeze(0)
-                .expand(n, batch_size, multibox["boxes_amount"], dim)
+                .unsqueeze(1)
+                .expand(batch_size, n, multibox["boxes_amount"], dim)
             )
 
             differences_min = random_points_unsqueezed - multibox_min_expanded
