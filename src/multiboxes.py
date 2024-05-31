@@ -178,7 +178,9 @@ class Multiboxes:
         dim = multiboxes.min.shape[2]
         number_of_points = points.shape[0]
 
-        points = points.unsqueeze(1).expand(batch_size, number_of_points, 1, dim)
+        points = (points.unsqueeze(1).expand(batch_size, number_of_points, 1, dim)).to(
+            device
+        )
         multibox_min_expanded = multiboxes.min.unsqueeze(1).expand(
             batch_size, number_of_points, boxes_amount, dim
         )
