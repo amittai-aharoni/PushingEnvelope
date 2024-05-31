@@ -83,15 +83,15 @@ class MultiBoxEL(nn.Module):
 
         self.monte_carlo_points = self.init_stratified_points(
             num_points=monte_carlo_points,
-            num_dimensions=embedding_dim,
-            num_strata_per_dim=5,
+            num_dimensions=embedding_dim // 2,
+            num_strata_per_dim=2,
         )
         self.monte_carlo_multiplier = torch.tensor(4 / monte_carlo_points).to(device)
 
         self.wandb = wandb
 
     def init_stratified_points(
-        self, min=-2, max=2, num_points=10000, num_dimensions=5, num_strata_per_dim=5
+        self, min=-2, max=2, num_points=10000, num_dimensions=5, num_strata_per_dim=2
     ):
         """
         Generate stratified points in a hypercube.
@@ -237,18 +237,14 @@ class MultiBoxEL(nn.Module):
         multiboxes1.to(self.device)
         multiboxes2.to(self.device)
         multiboxes1_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
-            multiboxes1,
-            self.monte_carlo_points,
-            device=self.device,
+            multiboxes1, self.monte_carlo_points, device=self.device
         )
         multiboxes2_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
-            multiboxes2,
-            self.monte_carlo_points,
-            device=self.device,
+            multiboxes2, self.monte_carlo_points, device=self.device
         )
         multibox1_area_estimate = (
             multiboxes1_soft_inclusion - 0.5
-        ).relu() * self.monte_carlo_points
+        ).relu() * self.monte_carlo_multiplier
 
         intersection_inclusion = torch.cat(
             [
@@ -259,7 +255,7 @@ class MultiBoxEL(nn.Module):
         ).mean(dim=2)
         intersection_area_estimate = (
             intersection_inclusion - 0.5
-        ).relu() * self.monte_carlo_points
+        ).relu() * self.monte_carlo_multiplier
 
         loss = (1 - intersection_area_estimate / multibox1_area_estimate).mean()
         loss = torch.reshape(relu(loss), [-1, 1])
@@ -273,21 +269,17 @@ class MultiBoxEL(nn.Module):
         multiboxes2.to(self.device)
 
         multiboxes1_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
-            multiboxes1,
-            self.monte_carlo_points,
-            device=self.device,
+            multiboxes1, self.monte_carlo_points, device=self.device
         )
         multiboxes2_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
-            multiboxes2,
-            self.monte_carlo_points,
-            device=self.device,
+            multiboxes2, self.monte_carlo_points, device=self.device
         )
         multibox1_area_estimate = (multiboxes1_soft_inclusion - 0.5).relu().sum(
             dim=1
-        ) * self.monte_carlo_points
+        ) * self.monte_carlo_multiplier
         multibox2_area_estimate = (multiboxes2_soft_inclusion - 0.5).relu().sum(
             dim=1
-        ) * self.monte_carlo_points
+        ) * self.monte_carlo_multiplier
 
         union_inclusion = (
             torch.cat(
@@ -302,7 +294,7 @@ class MultiBoxEL(nn.Module):
         )
         union_area_estimate = (union_inclusion - 0.5).relu().sum(
             dim=1
-        ) * self.monte_carlo_points
+        ) * self.monte_carlo_multiplier
 
         loss = (
             1
