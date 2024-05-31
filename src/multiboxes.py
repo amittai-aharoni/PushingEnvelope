@@ -172,6 +172,43 @@ class Multiboxes:
         return area
 
     @staticmethod
+    def quasi_monte_carlo_area(multiboxes, points, device):
+        batch_size = multiboxes.min.shape[0]
+        boxes_amount = multiboxes.min.shape[1]
+        dim = multiboxes.min.shape[2]
+        number_of_points = points.shape[0]
+
+        points = points.unsqueeze(1).expand(batch_size, number_of_points, 1, dim)
+        multibox_min_expanded = multiboxes.min.unsqueeze(1).expand(
+            batch_size, number_of_points, boxes_amount, dim
+        )
+        multibox_max_expanded = multiboxes.max.unsqueeze(1).expand(
+            batch_size, number_of_points, boxes_amount, dim
+        )
+        # for each dimension, if sigmoid > 0.5, then the point is in the bounds
+        # of the box for that dimension
+        # Hence the mean of the sigmoid > 0.5 if the point is in the box
+        differences_min = (points - multibox_min_expanded).sigmoid().unsqueeze(dim=4)
+        differences_max = (multibox_max_expanded - points).sigmoid().unsqueeze(dim=4)
+
+        differences_cat = torch.cat([differences_min, differences_max], dim=4).mean(
+            dim=4
+        )
+        differences_cat = differences_cat.mean(dim=3)
+
+        differences_cat = differences_cat.max(dim=2).values
+        soft_inclusion = differences_cat
+
+        # intersection_inclusion = torch.cat([multibox["soft_inclusion"].unsqueeze(-1) for multibox in multiboxes], dim=2).mean(dim=2)
+
+        # multibox1 = multiboxes[0]['soft_inclusion']
+        # multibox1 = (multibox1 - 0.5).relu() * multiplier
+
+        #         intersection = (intersection_inclusion - 0.5).relu() * multiplier
+
+        return soft_inclusion
+
+    @staticmethod
     def monte_carlo_area(multiboxes1, multiboxes2, device):
         # Generate random points
         n = MONTE_CARLO_SAMPLES
