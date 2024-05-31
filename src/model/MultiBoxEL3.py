@@ -1,14 +1,17 @@
+import itertools
 import os
+import pickle
 from typing import Any, Generator
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.functional import relu
+from tqdm import tqdm
 
 from src.model.loaded_models import MultiBoxELLoadedModel
 from src.multiboxes import Multiboxes
-from src.config import EMBEDDING_BOUND
+from src.config import EMBEDDING_BOUND, MONTE_CARLO_SAMPLES
 
 
 class MultiBoxEL(nn.Module):
@@ -27,6 +30,7 @@ class MultiBoxEL(nn.Module):
         batch_size: int = 512,
         vis_loss: bool = False,
         wandb=None,
+        monte_carlo_points=MONTE_CARLO_SAMPLES,
     ):
         """
         Args:
@@ -76,7 +80,55 @@ class MultiBoxEL(nn.Module):
             dim=embedding_dim * 2,
             num_boxes_per_class=num_boxes_per_class,
         )
+
+        self.monte_carlo_points = self.init_stratified_points(
+            num_points=monte_carlo_points,
+            num_dimensions=embedding_dim,
+            num_strata_per_dim=5,
+        )
+        self.monte_carlo_multiplier = torch.tensor(4 / monte_carlo_points).to(device)
+
         self.wandb = wandb
+
+    def init_stratified_points(
+        self, min=-2, max=2, num_points=10000, num_dimensions=5, num_strata_per_dim=5
+    ):
+        """
+        Generate stratified points in a hypercube.
+        """
+        pickle_file = "stratified_points.pkl"
+
+        if os.path.exists(pickle_file):
+            with open(pickle_file, "rb") as f:
+                samples = pickle.load(f)
+                return samples
+        total_strata = num_strata_per_dim**num_dimensions
+        points_per_strata = num_points // total_strata
+        strata_bounds = torch.linspace(-2, 2, num_strata_per_dim + 1)
+        samples = []
+        iter = itertools.product(range(num_strata_per_dim), repeat=num_dimensions)
+        # Loop over each combination of strata indices
+        for strata in tqdm(
+            iter, desc="Computing strata", total=num_strata_per_dim**num_dimensions
+        ):
+            # Calculate start and end bounds for each dimension
+            starts = torch.tensor(
+                [strata_bounds[strata[i]] for i in range(num_dimensions)]
+            )
+            ends = torch.tensor(
+                [strata_bounds[strata[i] + 1] for i in range(num_dimensions)]
+            )
+            # Generate uniformly distributed points within the current stratum for each dimension
+            stratum_samples = (
+                torch.rand((points_per_strata, num_dimensions)) * (ends - starts)
+            ) + starts
+            samples.append(stratum_samples)
+        samples = torch.cat(samples)
+        # Shuffle the samples to remove any order introduced by the stratification
+        samples = samples[torch.randperm(samples.shape[0])]
+        with open(pickle_file, "wb") as f:
+            pickle.dump(samples, f)
+        return samples
 
     def init_embeddings(
         self,
@@ -117,7 +169,7 @@ class MultiBoxEL(nn.Module):
                 embeddings.weight[:, i * dim + dim // 2 : (i + 1) * dim],
                 mean=0.5,
                 std=0.1673,
-            )
+            ).clamp(min=0.01, max=0.99)
         if normalise:
             embeddings.weight.data /= torch.linalg.norm(
                 embeddings.weight.data, axis=1
@@ -184,16 +236,32 @@ class MultiBoxEL(nn.Module):
         """
         multiboxes1.to(self.device)
         multiboxes2.to(self.device)
-        soft_includes = Multiboxes.monte_carlo_area(
-            multiboxes1, multiboxes2, device=self.device
+        multiboxes1_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
+            multiboxes1,
+            self.monte_carlo_points,
+            device=self.device,
         )
-        multibox1_points = torch.gt(soft_includes[0], 0.5).sum(dim=0)
-        intersection = (
-            torch.stack([soft_includes[0], soft_includes[1]], dim=2).min(dim=2).values
+        multiboxes2_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
+            multiboxes2,
+            self.monte_carlo_points,
+            device=self.device,
         )
-        intersection_points = torch.gt(intersection, 0.5).sum(dim=0)
+        multibox1_area_estimate = (
+            multiboxes1_soft_inclusion - 0.5
+        ).relu() * self.monte_carlo_points
 
-        loss = 1 - (intersection_points / multibox1_points).mean()
+        intersection_inclusion = torch.cat(
+            [
+                multiboxes1_soft_inclusion.unsqueeze(-1),
+                multiboxes2_soft_inclusion.unsqueeze(-1),
+            ],
+            dim=2,
+        ).mean(dim=2)
+        intersection_area_estimate = (
+            intersection_inclusion - 0.5
+        ).relu() * self.monte_carlo_points
+
+        loss = (1 - intersection_area_estimate / multibox1_area_estimate).mean()
         loss = torch.reshape(relu(loss), [-1, 1])
         return loss
 
@@ -203,17 +271,43 @@ class MultiBoxEL(nn.Module):
         """
         multiboxes1.to(self.device)
         multiboxes2.to(self.device)
-        soft_includes = Multiboxes.monte_carlo_area(
-            multiboxes1, multiboxes2, device=self.device
-        )
-        multibox1_points = torch.gt(soft_includes[0], 0.5).sum(dim=0)
-        multibox2_points = torch.gt(soft_includes[1], 0.5).sum(dim=0)
-        union = (
-            torch.stack([soft_includes[0], soft_includes[1]], dim=2).max(dim=2).values
-        )
-        union_points = torch.gt(union, 0.5).sum(dim=0)
 
-        loss = 1 - (union_points / (multibox1_points + multibox2_points)).mean()
+        multiboxes1_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
+            multiboxes1,
+            self.monte_carlo_points,
+            device=self.device,
+        )
+        multiboxes2_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
+            multiboxes2,
+            self.monte_carlo_points,
+            device=self.device,
+        )
+        multibox1_area_estimate = (multiboxes1_soft_inclusion - 0.5).relu().sum(
+            dim=1
+        ) * self.monte_carlo_points
+        multibox2_area_estimate = (multiboxes2_soft_inclusion - 0.5).relu().sum(
+            dim=1
+        ) * self.monte_carlo_points
+
+        union_inclusion = (
+            torch.cat(
+                [
+                    multiboxes1_soft_inclusion.unsqueeze(-1),
+                    multiboxes2_soft_inclusion.unsqueeze(-1),
+                ],
+                dim=2,
+            )
+            .max(dim=2)
+            .values
+        )
+        union_area_estimate = (union_inclusion - 0.5).relu().sum(
+            dim=1
+        ) * self.monte_carlo_points
+
+        loss = (
+            1
+            - union_area_estimate / (multibox1_area_estimate + multibox2_area_estimate)
+        ).mean()
         loss = torch.reshape(relu(loss), [-1, 1])
         return loss
 
