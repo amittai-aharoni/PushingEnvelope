@@ -286,7 +286,12 @@ class MultiBoxEL(nn.Module):
             intersection_inclusion - 0.5
         ).relu() * self.monte_carlo_multiplier
 
-        loss = (1 - intersection_area_estimate / multibox1_area_estimate).relu().mean()
+        ratio = torch.div(intersection_area_estimate, multibox1_area_estimate)
+        mask = torch.isnan(ratio)
+        ratio = torch.where(mask, torch.zeros_like(ratio), ratio)
+
+        loss = (torch.tensor(1) - ratio).relu().mean()
+
         loss = torch.reshape(loss, [-1, 1])
         return loss
 
@@ -331,15 +336,13 @@ class MultiBoxEL(nn.Module):
             dim=1
         ) * self.monte_carlo_multiplier
 
-        loss = (
-            (
-                1
-                - union_area_estimate
-                / (multibox1_area_estimate + multibox2_area_estimate)
-            )
-            .relu()
-            .mean()
+        ratio = torch.div(
+            union_area_estimate, multibox1_area_estimate + multibox2_area_estimate
         )
+        mask = torch.isnan(ratio)
+        ratio = torch.where(mask, torch.zeros_like(ratio), ratio)
+
+        loss = (1 - ratio).relu().mean()
         loss = torch.reshape(loss, [-1, 1])
         return loss
 

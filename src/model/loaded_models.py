@@ -89,7 +89,7 @@ class MultiBoxELLoadedModel(LoadedModel):
             np.load(f"{folder}/class_embeds{suffix}.npy")
         ).to(device)
         model.relation_embeds = torch.from_numpy(
-            np.load(f"{folder}/relations{suffix}.npy")
+            np.load(f"{folder}/relations_embeds{suffix}.npy")
         ).to(device)
         if os.path.exists(f"{folder}/individual_embeds{suffix}.npy"):
             model.individual_embeds = torch.from_numpy(
