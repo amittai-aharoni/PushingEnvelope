@@ -81,22 +81,45 @@ class MultiBoxEL(nn.Module):
             num_boxes_per_class=num_boxes_per_class,
         )
 
-        self.monte_carlo_points = self.init_stratified_points(
-            num_points=monte_carlo_points,
-            num_dimensions=embedding_dim // 2,
-            num_strata_per_dim=2,
+        # self.monte_carlo_points = self.init_stratified_points(
+        #     num_points=monte_carlo_points,
+        #     num_dimensions=embedding_dim // 2,
+        #     num_strata_per_dim=3,
+        # )
+        #
+        # self.monte_carlo_role_points = self.init_stratified_points(
+        #     num_points=monte_carlo_points,
+        #     num_dimensions=embedding_dim,
+        #     num_strata_per_dim=3,
+        #     role=True,
+        # )
+        self.monte_carlo_points = torch.rand(monte_carlo_points, embedding_dim // 2).to(
+            device
         )
+        self.monte_carlo_role_points = torch.rand(monte_carlo_points, embedding_dim).to(
+            device
+        )
+
         self.monte_carlo_multiplier = torch.tensor(4 / monte_carlo_points).to(device)
 
         self.wandb = wandb
 
     def init_stratified_points(
-        self, min=-2, max=2, num_points=10000, num_dimensions=5, num_strata_per_dim=2
+        self,
+        min=-2,
+        max=2,
+        num_points=10000,
+        num_dimensions=5,
+        num_strata_per_dim=2,
+        role=False,
     ):
         """
         Generate stratified points in a hypercube.
         """
-        pickle_file = "stratified_points.pkl"
+        if role:
+            pickle_file = "stratified_role_points.pkl"
+        else:
+            pickle_file = "stratified_points.pkl"
 
         if os.path.exists(pickle_file):
             with open(pickle_file, "rb") as f:
@@ -230,17 +253,23 @@ class MultiBoxEL(nn.Module):
             self.get_multiboxes(self.individual_embeds(nf_data[:, i])) for i in indices
         )
 
-    def inclusion_loss(self, multiboxes1: Multiboxes, multiboxes2: Multiboxes):
+    def inclusion_loss(
+        self, multiboxes1: Multiboxes, multiboxes2: Multiboxes, role=False
+    ):
         """
         Compute 1 - Area(B1 cap B2) / Area(B1)
         """
+        if role:
+            points = self.monte_carlo_role_points
+        else:
+            points = self.monte_carlo_points
         multiboxes1.to(self.device)
         multiboxes2.to(self.device)
         multiboxes1_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
-            multiboxes1, self.monte_carlo_points, device=self.device
+            multiboxes1, points, device=self.device
         )
         multiboxes2_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
-            multiboxes2, self.monte_carlo_points, device=self.device
+            multiboxes2, points, device=self.device
         )
         multibox1_area_estimate = (
             multiboxes1_soft_inclusion - 0.5
@@ -257,22 +286,28 @@ class MultiBoxEL(nn.Module):
             intersection_inclusion - 0.5
         ).relu() * self.monte_carlo_multiplier
 
-        loss = (1 - intersection_area_estimate / multibox1_area_estimate).mean()
-        loss = torch.reshape(relu(loss), [-1, 1])
+        loss = (1 - intersection_area_estimate / multibox1_area_estimate).relu().mean()
+        loss = torch.reshape(loss, [-1, 1])
         return loss
 
-    def disjoint_loss(self, multiboxes1: Multiboxes, multiboxes2: Multiboxes):
+    def disjoint_loss(
+        self, multiboxes1: Multiboxes, multiboxes2: Multiboxes, role=False
+    ):
         """
         Compute 1 - Area(B1 cup B2) / Area(B1) + Area(B2)
         """
+        if role:
+            points = self.monte_carlo_role_points
+        else:
+            points = self.monte_carlo_points
         multiboxes1.to(self.device)
         multiboxes2.to(self.device)
 
         multiboxes1_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
-            multiboxes1, self.monte_carlo_points, device=self.device
+            multiboxes1, points, device=self.device
         )
         multiboxes2_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
-            multiboxes2, self.monte_carlo_points, device=self.device
+            multiboxes2, points, device=self.device
         )
         multibox1_area_estimate = (multiboxes1_soft_inclusion - 0.5).relu().sum(
             dim=1
@@ -297,10 +332,15 @@ class MultiBoxEL(nn.Module):
         ) * self.monte_carlo_multiplier
 
         loss = (
-            1
-            - union_area_estimate / (multibox1_area_estimate + multibox2_area_estimate)
-        ).mean()
-        loss = torch.reshape(relu(loss), [-1, 1])
+            (
+                1
+                - union_area_estimate
+                / (multibox1_area_estimate + multibox2_area_estimate)
+            )
+            .relu()
+            .mean()
+        )
+        loss = torch.reshape(loss, [-1, 1])
         return loss
 
     def neg_loss(self, boxes1, boxes2):
@@ -407,7 +447,7 @@ class MultiBoxEL(nn.Module):
 
     def role_inclusion_loss(self, data):
         r1_multiboxes, r2_multiboxes = self.get_relation_multiboxes(data, 0, 1)
-        return self.inclusion_loss(r1_multiboxes, r2_multiboxes)
+        return self.inclusion_loss(r1_multiboxes, r2_multiboxes, role=True)
 
     def role_chain_loss(self, data):
         """
