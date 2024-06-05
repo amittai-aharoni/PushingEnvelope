@@ -7,7 +7,8 @@ import torch
 import torch.nn.functional as F
 from tqdm import trange
 
-from src.model.loaded_models import BoxELLoadedModel, LoadedModel
+from src.model.loaded_models import BoxELLoadedModel, LoadedModel, MultiBoxELLoadedModel
+from src.multiboxes import Multiboxes
 from src.ranking_result import RankingResult
 from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device
@@ -103,9 +104,11 @@ def compute_ranks(
             fun += "_translational"
         elif isinstance(model, BoxELLoadedModel):
             fun += "_boxel"
+        elif isinstance(model, MultiBoxELLoadedModel):
+            fun += "_multiboxel"
 
         batch_ranks = globals()[fun](
-            model, batch_data, current_batch_size
+            model, batch_data, current_batch_size, device
         )  # call the correct function based on NF
         top1 += (batch_ranks <= 1).sum()
         top10 += (batch_ranks <= 10).sum()
@@ -117,7 +120,7 @@ def compute_ranks(
     return RankingResult(top1.item(), top10.item(), top100.item(), ranks, auc)
 
 
-def compute_nf1_ranks(model, batch_data, batch_size):
+def compute_nf1_ranks(model, batch_data, batch_size, device=None):
     class_boxes = model.get_boxes(model.class_embeds)
     centers = class_boxes.centers
     batch_centers = centers[batch_data[:, 0]]
@@ -128,7 +131,19 @@ def compute_nf1_ranks(model, batch_data, batch_size):
     return dists_to_ranks(dists, batch_data[:, 1])
 
 
-def compute_nf1_ranks_boxel(model, batch_data, batch_size):
+def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
+    class_multiboxes = model.get_multiboxes(model.class_embeds)
+    centers = (class_multiboxes.max + class_multiboxes.min) / 2
+    batch_centers = centers[batch_data[:, 0]]
+
+    dists = batch_centers[:, None, :, :] - torch.tile(centers, (batch_size, 1, 1, 1))
+    dists = torch.linalg.norm(dists, dim=3, ord=2)
+    dists = torch.linalg.norm(dists, dim=2, ord=2)
+    dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
+    return dists_to_ranks(dists, batch_data[:, 1])
+
+
+def compute_nf1_ranks_boxel(model, batch_data, batch_size, device=None):
     batch_mins = model.min_embedding[batch_data[:, 0]]
     batch_deltas = model.delta_embedding[batch_data[:, 0]]
     batch_maxs = batch_mins + torch.exp(batch_deltas)
@@ -168,7 +183,29 @@ def compute_nf2_ranks(model, batch_data, batch_size):
     return dists_to_ranks(dists, batch_data[:, 2])
 
 
-def compute_nf2_ranks_boxel(model, batch_data, batch_size):
+def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
+    class_multiboxes = model.get_multiboxes(model.class_embeds)
+    centers = (class_multiboxes.max + class_multiboxes.min) / 2
+    c_multiboxes = class_multiboxes[batch_data[:, 0]]
+    d_multiboxes = class_multiboxes[batch_data[:, 1]]
+
+    intersection = Multiboxes.intersect(c_multiboxes, d_multiboxes, device)
+    intersection_centers = (intersection.max + intersection.min) / 2
+    dists = intersection_centers[:, None, :, :] - torch.tile(
+        centers, (batch_size, 1, 1, 1)
+    )
+    dists = torch.linalg.norm(dists, dim=3, ord=2)
+    dists = torch.linalg.norm(dists, dim=2, ord=2)
+    dists.scatter_(
+        1, batch_data[:, 0].reshape(-1, 1), torch.inf
+    )  # filter out c n d <= c
+    dists.scatter_(
+        1, batch_data[:, 1].reshape(-1, 1), torch.inf
+    )  # filter out c n d <= d
+    return dists_to_ranks(dists, batch_data[:, 2])
+
+
+def compute_nf2_ranks_boxel(model, batch_data, batch_size, device=None):
     c_mins = model.min_embedding[batch_data[:, 0]]
     c_deltas = model.delta_embedding[batch_data[:, 0]]
     c_maxs = c_mins + torch.exp(c_deltas)
@@ -205,7 +242,7 @@ def compute_nf2_ranks_boxel(model, batch_data, batch_size):
     return dists_to_ranks(dists, batch_data[:, 2])
 
 
-def compute_nf3_ranks(model, batch_data, batch_size):
+def compute_nf3_ranks(model, batch_data, batch_size, device=None):
     class_boxes = model.get_boxes(model.class_embeds)
     bumps = model.bumps
     head_boxes = model.get_boxes(model.relation_heads)
@@ -228,7 +265,27 @@ def compute_nf3_ranks(model, batch_data, batch_size):
     return dists_to_ranks(dists, batch_data[:, 0])
 
 
-def compute_nf4_ranks(model, batch_data, batch_size):
+def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
+    class_multiboxes = model.get_multiboxes(model.class_embeds)
+    relation_multiboxes = model.get_multiboxes(model.relation_embeds, is_relation=True)
+    centers = (class_multiboxes.max + class_multiboxes.min) / 2
+
+    d_multiboxes = class_multiboxes[batch_data[:, 2]]
+    r_multiboxes = relation_multiboxes[batch_data[:, 1]]
+    existential_multiboxes = Multiboxes.get_existential(
+        d_multiboxes, r_multiboxes, device
+    )
+
+    existential_centers = (existential_multiboxes.max + existential_multiboxes.min) / 2
+    dists = existential_centers[:, None, :, :] - torch.tile(
+        centers, (batch_size, 1, 1, 1)
+    )
+    dists = torch.linalg.norm(dists, dim=3, ord=2)
+    dists = torch.linalg.norm(dists, dim=2, ord=2)
+    return dists_to_ranks(dists, batch_data[:, 0])
+
+
+def compute_nf4_ranks(model, batch_data, batch_size, device=None):
     class_boxes = model.get_boxes(model.class_embeds)
     bumps = model.bumps
     head_boxes = model.get_boxes(model.relation_heads)
@@ -243,7 +300,27 @@ def compute_nf4_ranks(model, batch_data, batch_size):
     return dists_to_ranks(dists, batch_data[:, 2])
 
 
-def compute_nf3_ranks_translational(model, batch_data, batch_size):
+def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
+    class_multiboxes = model.get_multiboxes(model.class_embeds)
+    relation_multiboxes = model.get_multiboxes(model.relation_embeds, is_relation=True)
+    centers = (class_multiboxes.max + class_multiboxes.min) / 2
+
+    c_multiboxes = class_multiboxes[batch_data[:, 1]]
+    r_multiboxes = relation_multiboxes[batch_data[:, 0]]
+    existential_multiboxes = Multiboxes.get_existential(
+        c_multiboxes, r_multiboxes, device
+    )
+
+    existential_centers = (existential_multiboxes.max + existential_multiboxes.min) / 2
+    dists = existential_centers[:, None, :, :] - torch.tile(
+        centers, (batch_size, 1, 1, 1)
+    )
+    dists = torch.linalg.norm(dists, dim=3, ord=2)
+    dists = torch.linalg.norm(dists, dim=2, ord=2)
+    return dists_to_ranks(dists, batch_data[:, 2])
+
+
+def compute_nf3_ranks_translational(model, batch_data, batch_size, device=None):
     class_boxes = model.get_boxes(model.class_embeds)
     centers = class_boxes.centers
     d_centers = centers[batch_data[:, 2]]
@@ -255,7 +332,7 @@ def compute_nf3_ranks_translational(model, batch_data, batch_size):
     return dists_to_ranks(dists, batch_data[:, 0])
 
 
-def compute_nf3_ranks_boxel(model, batch_data, batch_size):
+def compute_nf3_ranks_boxel(model, batch_data, batch_size, device=None):
     batch_mins = model.min_embedding[batch_data[:, 2]]
     batch_deltas = model.delta_embedding[batch_data[:, 2]]
     batch_maxs = batch_mins + torch.exp(batch_deltas)
@@ -283,7 +360,7 @@ def compute_nf3_ranks_boxel(model, batch_data, batch_size):
     return dists_to_ranks(dists, batch_data[:, 0])
 
 
-def compute_nf4_ranks_translational(model, batch_data, batch_size):
+def compute_nf4_ranks_translational(model, batch_data, batch_size, device=None):
     class_boxes = model.get_boxes(model.class_embeds)
     centers = class_boxes.centers
     c_centers = centers[batch_data[:, 1]]
@@ -295,7 +372,7 @@ def compute_nf4_ranks_translational(model, batch_data, batch_size):
     return dists_to_ranks(dists, batch_data[:, 2])
 
 
-def compute_nf4_ranks_boxel(model, batch_data, batch_size):
+def compute_nf4_ranks_boxel(model, batch_data, batch_size, device=None):
     batch_mins = model.min_embedding[batch_data[:, 1]]
     batch_deltas = model.delta_embedding[batch_data[:, 1]]
     batch_maxs = batch_mins + torch.exp(batch_deltas)

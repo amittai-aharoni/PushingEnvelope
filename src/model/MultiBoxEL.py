@@ -1,14 +1,17 @@
+import itertools
 import os
-from typing import Any, Generator, List
+import pickle
+from typing import Any, Generator
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.functional import relu
+from tqdm import tqdm
 
 from src.model.loaded_models import MultiBoxELLoadedModel
-from src.multibox_operations.multibox_operations import Box, Multibox
-from src.config import EMBEDDING_BOUND
+from src.multiboxes import Multiboxes
+from src.config import EMBEDDING_BOUND, MONTE_CARLO_SAMPLES
 
 
 class MultiBoxEL(nn.Module):
@@ -26,6 +29,9 @@ class MultiBoxEL(nn.Module):
         num_neg: int = 2,
         batch_size: int = 512,
         vis_loss: bool = False,
+        wandb=None,
+        monte_carlo_points=MONTE_CARLO_SAMPLES,
+        stratified_points=False,
     ):
         """
         Args:
@@ -40,6 +46,9 @@ class MultiBoxEL(nn.Module):
             num_neg: number of negative samples we generate per nf3 sample
             batch_size: batch size
             vis_loss: whether to use the visualisation loss
+            wandb: wandb object
+            monte_carlo_points: number of monte carlo points
+            stratified_points: whether to use stratified points
         """
         super(MultiBoxEL, self).__init__()
 
@@ -75,6 +84,77 @@ class MultiBoxEL(nn.Module):
             dim=embedding_dim * 2,
             num_boxes_per_class=num_boxes_per_class,
         )
+
+        if stratified_points:
+            self.monte_carlo_points = self.init_stratified_points(
+                num_points=monte_carlo_points,
+                num_dimensions=embedding_dim // 2,
+                num_strata_per_dim=3,
+            )
+
+            self.monte_carlo_role_points = self.init_stratified_points(
+                num_points=monte_carlo_points,
+                num_dimensions=embedding_dim,
+                num_strata_per_dim=3,
+                role=True,
+            )
+        self.monte_carlo_points = torch.rand(monte_carlo_points, embedding_dim // 2).to(
+            device
+        )
+        self.monte_carlo_role_points = torch.rand(monte_carlo_points, embedding_dim).to(
+            device
+        )
+
+        self.monte_carlo_multiplier = torch.tensor(4 / monte_carlo_points).to(device)
+
+        self.wandb = wandb
+
+    def init_stratified_points(
+        self,
+        num_points=10000,
+        num_dimensions=5,
+        num_strata_per_dim=2,
+        role=False,
+    ):
+        """
+        Generate stratified points in a hypercube.
+        """
+        if role:
+            pickle_file = "stratified_role_points.pkl"
+        else:
+            pickle_file = "stratified_points.pkl"
+
+        if os.path.exists(pickle_file):
+            with open(pickle_file, "rb") as f:
+                samples = pickle.load(f)
+                return samples
+        total_strata = num_strata_per_dim**num_dimensions
+        points_per_strata = num_points // total_strata
+        strata_bounds = torch.linspace(-2, 2, num_strata_per_dim + 1)
+        samples = []
+        iter = itertools.product(range(num_strata_per_dim), repeat=num_dimensions)
+        # Loop over each combination of strata indices
+        for strata in tqdm(
+            iter, desc="Computing strata", total=num_strata_per_dim**num_dimensions
+        ):
+            # Calculate start and end bounds for each dimension
+            starts = torch.tensor(
+                [strata_bounds[strata[i]] for i in range(num_dimensions)]
+            )
+            ends = torch.tensor(
+                [strata_bounds[strata[i] + 1] for i in range(num_dimensions)]
+            )
+            # Generate uniformly distributed points within the current stratum for each dimension
+            stratum_samples = (
+                torch.rand((points_per_strata, num_dimensions)) * (ends - starts)
+            ) + starts
+            samples.append(stratum_samples)
+        samples = torch.cat(samples)
+        # Shuffle the samples to remove any order introduced by the stratification
+        samples = samples[torch.randperm(samples.shape[0])]
+        with open(pickle_file, "wb") as f:
+            pickle.dump(samples, f)
+        return samples
 
     def init_embeddings(
         self,
@@ -115,22 +195,22 @@ class MultiBoxEL(nn.Module):
                 embeddings.weight[:, i * dim + dim // 2 : (i + 1) * dim],
                 mean=0.5,
                 std=0.1673,
-            )
+            ).clamp(min=0.01, max=0.99)
         if normalise:
             embeddings.weight.data /= torch.linalg.norm(
                 embeddings.weight.data, axis=1
             ).reshape(-1, 1)
         return embeddings
 
-    def get_multiboxes(
-        self, embedding: torch.Tensor, is_relation=False
-    ) -> List[Multibox]:
-        multiboxes = []
+    def get_multiboxes(self, embedding: torch.Tensor, is_relation=False) -> Multiboxes:
         embedding_dim = self.embedding_dim * 2 if is_relation else self.embedding_dim
         boxes_amount = embedding.shape[1] // embedding_dim
+        minimums = []
+        maximums = []
         # range over the rows of the embedding
         for i in range(embedding.shape[0]):
-            boxes = []
+            boxes_minimum = []
+            boxes_maximum = []
             # iterate over the number of boxes per class
             for j in range(boxes_amount):
                 box_start = j * embedding_dim
@@ -139,18 +219,26 @@ class MultiBoxEL(nn.Module):
                 offsets = torch.abs(
                     embedding[i, box_middle : box_start + embedding_dim]
                 )
-                boxes.append(Box(center=center, offsets=offsets))
-            multiboxes.append(Multibox(boxes))
+                boxes_minimum.append(center - offsets)
+                boxes_maximum.append(center + offsets)
+            boxes_minimum = torch.stack(boxes_minimum)
+            boxes_maximum = torch.stack(boxes_maximum)
+            minimums.append(boxes_minimum)
+            maximums.append(boxes_maximum)
+        minimums = torch.stack(minimums)
+        maximums = torch.stack(maximums)
+        multiboxes = Multiboxes(minimums, maximums)
+        multiboxes = multiboxes.to(self.device)
         return multiboxes
 
     def get_class_multiboxes(
         self, nf_data: torch.Tensor, *indices: int
-    ) -> Generator[List[Multibox], Any, None]:
+    ) -> Generator[Multiboxes, Any, None]:
         return (self.get_multiboxes(self.class_embeds(nf_data[:, i])) for i in indices)
 
     def get_relation_multiboxes(
         self, nf_data, *indices
-    ) -> Generator[List[Multibox], Any, None]:
+    ) -> Generator[Multiboxes, Any, None]:
         if len(indices) == 1:
             index = indices[0]
             return self.get_multiboxes(
@@ -163,65 +251,103 @@ class MultiBoxEL(nn.Module):
 
     def get_individual_multiboxes(
         self, nf_data, *indices
-    ) -> Generator[List[Multibox], Any, None]:
+    ) -> Generator[Multiboxes, Any, None]:
         return (
             self.get_multiboxes(self.individual_embeds(nf_data[:, i])) for i in indices
         )
 
-    def inclusion_loss(self, multiboxes1: List[Multibox], multiboxes2: List[Multibox]):
+    def inclusion_loss(
+        self, multiboxes1: Multiboxes, multiboxes2: Multiboxes, role=False
+    ):
         """
         Compute 1 - Area(B1 cap B2) / Area(B1)
         """
-        loses = []
-        incrementor = 0
-        for multibox1, multibox2 in zip(multiboxes1, multiboxes2):
-            intersection = multibox1.intersect(multibox2)
-            multibox1_area = multibox1.area()
-            if multibox1_area == 0:
-                loses.append(torch.tensor(0.0).to(self.device))
-                continue
-            if multibox1_area == float("inf"):
-                loses.append(
-                    torch.tensor(
-                        1 - intersection.area() / (2 * EMBEDDING_BOUND),
-                        dtype=torch.float64,
-                    ).to(self.device)
-                )
-                continue
-            loses.append(
-                torch.tensor(1 - intersection.area() / multibox1_area).to(self.device)
-            )
-            incrementor += 1
-        loses = torch.stack(loses)
-        dist = torch.reshape(torch.linalg.norm(relu(loses)), [-1, 1])
-        dist = dist.squeeze()
-        return dist
+        if role:
+            points = self.monte_carlo_role_points
+        else:
+            points = self.monte_carlo_points
+        multiboxes1.to(self.device)
+        multiboxes2.to(self.device)
+        multiboxes1_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
+            multiboxes1, points, device=self.device
+        )
+        multiboxes2_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
+            multiboxes2, points, device=self.device
+        )
+        multibox1_area_estimate = (
+            multiboxes1_soft_inclusion - 0.5
+        ).relu() * self.monte_carlo_multiplier
 
-    def disjoint_loss(self, multiboxes1: List[Multibox], multiboxes2: List[Multibox]):
+        intersection_inclusion = torch.cat(
+            [
+                multiboxes1_soft_inclusion.unsqueeze(-1),
+                multiboxes2_soft_inclusion.unsqueeze(-1),
+            ],
+            dim=2,
+        ).mean(dim=2)
+        intersection_area_estimate = (
+            intersection_inclusion - 0.5
+        ).relu() * self.monte_carlo_multiplier
+
+        ratio = torch.div(intersection_area_estimate, multibox1_area_estimate)
+        mask = torch.isnan(ratio)
+        ratio = torch.where(mask, torch.zeros_like(ratio), ratio)
+
+        loss = (torch.tensor(1) - ratio).relu().mean()
+
+        loss = torch.reshape(loss, [-1, 1])
+        return loss
+
+    def disjoint_loss(
+        self, multiboxes1: Multiboxes, multiboxes2: Multiboxes, role=False
+    ):
         """
         Compute 1 - Area(B1 cup B2) / Area(B1) + Area(B2)
         """
-        loses = []
-        for multibox1, multibox2 in zip(multiboxes1, multiboxes2):
-            union = Multibox(multibox1.boxes + multibox2.boxes)
-            multibox1_area = multibox1.area()
-            multibox2_area = multibox2.area()
-            if multibox1_area == 0 and multibox2_area == 0:
-                loses.append(torch.tensor(0.0))
-                continue
-            if multibox1_area == float("inf") and multibox2_area == float("inf"):
-                loses.append(1 - union.area() / (2 * EMBEDDING_BOUND))
-                continue
-            if multibox1_area == float("inf"):
-                loses.append(1 - union.area() / (2 * EMBEDDING_BOUND + multibox2_area))
-                continue
-            if multibox2_area == float("inf"):
-                loses.append(1 - union.area() / (multibox1_area + 2 * EMBEDDING_BOUND))
-                continue
-            loses.append(1 - union.area() / (multibox1.area() + multibox2.area()))
-        loses = torch.stack(loses)
-        dist = torch.reshape(torch.linalg.norm(relu(loses)), [-1, 1])
-        return dist
+        if role:
+            points = self.monte_carlo_role_points
+        else:
+            points = self.monte_carlo_points
+        multiboxes1.to(self.device)
+        multiboxes2.to(self.device)
+
+        multiboxes1_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
+            multiboxes1, points, device=self.device
+        )
+        multiboxes2_soft_inclusion = Multiboxes.quasi_monte_carlo_area(
+            multiboxes2, points, device=self.device
+        )
+        multibox1_area_estimate = (multiboxes1_soft_inclusion - 0.5).relu().sum(
+            dim=1
+        ) * self.monte_carlo_multiplier
+        multibox2_area_estimate = (multiboxes2_soft_inclusion - 0.5).relu().sum(
+            dim=1
+        ) * self.monte_carlo_multiplier
+
+        union_inclusion = (
+            torch.cat(
+                [
+                    multiboxes1_soft_inclusion.unsqueeze(-1),
+                    multiboxes2_soft_inclusion.unsqueeze(-1),
+                ],
+                dim=2,
+            )
+            .max(dim=2)
+            .values
+        )
+        union_area_estimate = (union_inclusion - 0.5).relu().sum(
+            dim=1
+        ) * self.monte_carlo_multiplier
+
+        ratio = torch.div(
+            union_area_estimate, multibox1_area_estimate + multibox2_area_estimate
+        )
+        mask = torch.isnan(ratio)
+        ratio = torch.where(mask, torch.zeros_like(ratio), ratio)
+
+        loss = (1 - ratio).relu().mean()
+        loss = torch.reshape(loss, [-1, 1])
+        return loss
 
     def neg_loss(self, boxes1, boxes2):
         diffs = torch.abs(boxes1.centers - boxes2.centers)
@@ -247,7 +373,9 @@ class MultiBoxEL(nn.Module):
         c_multiboxes, d_multiboxes, e_multiboxes = self.get_class_multiboxes(
             nf2_data, 0, 1, 2
         )
-        intersection = [c.intersect(d) for c, d in zip(c_multiboxes, d_multiboxes)]
+        intersection = Multiboxes.intersect(
+            c_multiboxes, d_multiboxes, device=self.device
+        )
         return self.inclusion_loss(intersection, e_multiboxes)
 
     def nf2_disjoint_loss(self, disjoint_data):
@@ -263,14 +391,9 @@ class MultiBoxEL(nn.Module):
         """
         c_multiboxes, d_multiboxes = self.get_class_multiboxes(nf3_data, 0, 2)
         r_multiboxes = self.get_relation_multiboxes(nf3_data, 1)
-        r_multiboxes = [role for role in r_multiboxes]
-        existential_multiboxes = []
-        top = Box.top_box(dim=len(d_multiboxes[0].boxes[0].center))
-        top = top.to(self.device)
-        for r_multibox, d_multibox in zip(r_multiboxes, d_multiboxes):
-            pre_image_d_multibox = Multibox([top.concat(d) for d in d_multibox.boxes])
-            intersection = r_multibox.intersect(pre_image_d_multibox)
-            existential_multiboxes.append(intersection.project1())
+        existential_multiboxes = Multiboxes.get_existential(
+            d_multiboxes, r_multiboxes, self.device
+        )
 
         return self.inclusion_loss(c_multiboxes, existential_multiboxes)
 
@@ -289,12 +412,9 @@ class MultiBoxEL(nn.Module):
         """
         a_multiboxes, b_multiboxes = self.get_individual_multiboxes(data, 1, 2)
         r_multiboxes = self.get_relation_multiboxes(data, 0)
-        ab_multiboxes = []
-        for a_multibox, b_multibox in zip(a_multiboxes, b_multiboxes):
-            a_boxes = a_multibox.boxes
-            b_boxes = b_multibox.boxes
-            ab_boxes = [a.concat(b) for a, b in zip(a_boxes, b_boxes)]
-            ab_multiboxes.append(Multibox(ab_boxes))
+        ab_min = torch.cat((a_multiboxes.min, b_multiboxes.min), dim=2)
+        ab_max = torch.cat((a_multiboxes.max, b_multiboxes.max), dim=2)
+        ab_multiboxes = Multiboxes(ab_min, ab_max)
         return self.inclusion_loss(ab_multiboxes, r_multiboxes)
 
     def role_assertion_neg_loss(self, neg_data):
@@ -325,19 +445,15 @@ class MultiBoxEL(nn.Module):
         """
         c_multiboxes, d_multiboxes = self.get_class_multiboxes(nf4_data, 1, 2)
         r_multiboxes = self.get_relation_multiboxes(nf4_data, 0)
-        existential_multiboxes = []
-        top = Box.top_box(dim=len(d_multiboxes[0].boxes[0].center))
-        top = top.to(self.device)
-        for r_multibox, c_multibox in zip(r_multiboxes, c_multiboxes):
-            pre_image_c_multibox = Multibox([top.concat(c) for c in c_multibox.boxes])
-            intersection = r_multibox.intersect(pre_image_c_multibox)
-            existential_multiboxes.append(intersection.project2())
+        existential_multiboxes = Multiboxes.get_existential(
+            c_multiboxes, r_multiboxes, self.device
+        )
 
         return self.inclusion_loss(existential_multiboxes, d_multiboxes)
 
     def role_inclusion_loss(self, data):
         r1_multiboxes, r2_multiboxes = self.get_relation_multiboxes(data, 0, 1)
-        return self.inclusion_loss(r1_multiboxes, r2_multiboxes)
+        return self.inclusion_loss(r1_multiboxes, r2_multiboxes, role=True)
 
     def role_chain_loss(self, data):
         """
@@ -346,10 +462,20 @@ class MultiBoxEL(nn.Module):
         r1_multiboxes, r2_multiboxes, s_multiboxes = self.get_relation_multiboxes(
             data, 0, 1, 2
         )
-        r1_heads = [r1.project1() for r1 in r1_multiboxes]
-        r2_tails = [r2.project2() for r2 in r2_multiboxes]
-        s_heads = [s.project1() for s in s_multiboxes]
-        s_tails = [s.project2() for s in s_multiboxes]
+        dim = r1_multiboxes.min.shape[2]
+
+        r1_heads_min = r1_multiboxes.min[:, :, : dim // 2]
+        r1_heads_max = r1_multiboxes.max[:, :, : dim // 2]
+        r1_heads = Multiboxes(r1_heads_min, r1_heads_max)
+        r2_tails_min = r2_multiboxes.min[:, :, dim // 2 :]
+        r2_tails_max = r2_multiboxes.max[:, :, dim // 2 :]
+        r2_tails = Multiboxes(r2_tails_min, r2_tails_max)
+        s_heads_min = s_multiboxes.min[:, :, : dim // 2]
+        s_heads_max = s_multiboxes.max[:, :, : dim // 2]
+        s_heads = Multiboxes(s_heads_min, s_heads_max)
+        s_tails_min = s_multiboxes.min[:, :, dim // 2 :]
+        s_tails_max = s_multiboxes.max[:, :, dim // 2 :]
+        s_tails = Multiboxes(s_tails_min, s_tails_max)
 
         return (
             self.inclusion_loss(r1_heads, s_heads)
@@ -385,6 +511,8 @@ class MultiBoxEL(nn.Module):
                 nfi_data = self.get_data_batch(train_data, nfi)
                 nfi_loss = method(nfi_data).square().mean()
                 print(f"{nfi} loss: {nfi_loss}")
+                if self.wandb:
+                    self.wandb.log({f"{nfi}_loss": nfi_loss})
                 loss = loss + nfi_loss
 
         # if self.num_neg > 0:

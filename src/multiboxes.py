@@ -1,18 +1,4 @@
-import itertools
-from collections import defaultdict
-
 import torch
-from tqdm import tqdm
-
-from src.config import MONTE_CARLO_SAMPLES
-
-# Read powerset_lookup.csv
-POWERSETS_DICT = defaultdict(list)
-with open("powerset_lookup.csv", "r") as f:
-    lines = f.readlines()
-    for line in lines:
-        line = line.strip().split("\t")
-        POWERSETS_DICT[int(line[0])] = eval(line[1])
 
 
 class Multiboxes:
@@ -23,15 +9,14 @@ class Multiboxes:
 
         Parameters:
         min (torch.Tensor): A tensor of shape (b, n, d) where b is the batch size,
-        n is the number of boxes, and d is the dimensionality.
+                                        n is the number of boxes, and d is the dimensionality.
         max (torch.Tensor): A tensor of shape (b, n, d) where b is the batch size,
-        n is the number of boxes, and d is the dimensionality.
+                                          n is the number of boxes, and d is the dimensionality.
         suspicious (bool): A flag that indicates whether we might have boxes
-        with negative volume.
-        In this case, we replace the boxes with negative volume with 0 volume boxes.
-        We then reduce the number of boxes to the maximum number of boxes
-        that have positive volume.
-
+                                        with negative volume.
+                                        In this case, we replace the boxes with negative volume with 0 volume boxes.
+                                        We then reduce the number of boxes to the maximum number of boxes
+                                        that have positive volume.
         """
         if not suspicious:
             self.min = min
@@ -74,13 +59,6 @@ class Multiboxes:
                 max_A = multiboxes_A.max[:, index_A]
                 min_B = multiboxes_B.min[:, index_B]
                 max_B = multiboxes_B.max[:, index_B]
-                # if the number of boxes is different, we need to pad the smaller one with float("-inf") and float("inf")
-                # if min_A.shape[1] < min_B.shape[1]:
-                #     min_A = torch.cat([min_A, torch.full([min_A.shape[0], min_B.shape[1] - min_A.shape[1], min_A.shape[2]], float("-inf")).to(device)], dim=1)
-                #     max_A = torch.cat([max_A, torch.full([max_A.shape[0], max_B.shape[1] - max_A.shape[1], max_A.shape[2]], float("inf")).to(device)], dim=1)
-                # if min_B.shape[1] < min_A.shape[1]:
-                #     min_B = torch.cat([min_B, torch.full([min_B.shape[0], min_A.shape[1] - min_B.shape[1], min_B.shape[2]], float("-inf")).to(device)], dim=1)
-                #     max_B = torch.cat([max_B, torch.full([max_B.shape[0], max_A.shape[1] - max_B.shape[1], max_B.shape[2]], float("inf")).to(device)], dim=1)
                 min = torch.max(torch.stack([min_A, min_B]), dim=0).values
                 max = torch.min(torch.stack([max_A, max_B]), dim=0).values
                 mins.append(min)
@@ -93,94 +71,52 @@ class Multiboxes:
         )
 
     @staticmethod
-    def union(multiboxes_A, multiboxes_B):
-        """
-        Computes the union of two sets of boxes
-        """
-        min = torch.cat([multiboxes_A.min, multiboxes_B.min], dim=1)
-        max = torch.cat([multiboxes_A.max, multiboxes_B.max], dim=1)
-        return Multiboxes(min, max)
-
-    @staticmethod
     def top(dim):
         """
         Returns a muiltibox that covers the entire space
         by having the minimum -inf and the maximum +inf
         """
-        max = torch.full([dim], float("inf"))
-        min = torch.full([dim], float("-inf"))
+        max = torch.full([dim], float(2))
+        min = torch.full([dim], float(-2))
         return min, max
 
     @staticmethod
-    def index_power_set(n):
-        """
-        Returns the power set of the index of the boxes
-        """
-        print("Generating Power Set of size: ", n)
-        return itertools.product([0, 1], repeat=n)
-
-    @staticmethod
-    def sign(indices):
-        count = torch.sum(indices)
-        return count % 2 * 2 - 1
-
-    @staticmethod
-    def area(multiboxes, device):
-        n = multiboxes.min.shape[1]
-        if n == 0:
-            return torch.zeros(multiboxes.min.shape[0]).to(device)
-        cache_power_set = False
-        if n in POWERSETS_DICT:
-            print("Using cached power set of size: ", n)
-            power_set = POWERSETS_DICT[n]
-        else:
-            power_set = Multiboxes.index_power_set(n)
-            cache_power_set = True
-            cache_list = []
-        mins = []
-        maxs = []
-        signs = []
-        for indices in tqdm(power_set, desc="Computing Areas", total=2**n):
-            if cache_power_set:
-                cache_list.append(indices)
-            indices = torch.tensor(indices).to(device)
-            if len(indices) == 0:
-                continue
-            # min and max are tensors of shape (b, | S |, d) where | S | is the number of boxes in the subset
-            min = torch.index_select(multiboxes.min, 1, indices)
-            max = torch.index_select(multiboxes.max, 1, indices)
-
-            min = torch.max(min, dim=1).values
-            max = torch.min(max, dim=1).values
-            signs.append(Multiboxes.sign(indices))
-            mins.append(min)
-            maxs.append(max)
-        min = torch.stack(mins, dim=1)
-        max = torch.stack(maxs, dim=1)
-        diff = max - min
-        diff = torch.max(diff, torch.zeros_like(diff))
-        areas = torch.prod(diff, dim=2)
-        # sign = (|S| + 1 % 2) * 2 - 1
-        signs = torch.tensor(signs).to(device)
-        areas = areas * signs
-        if cache_power_set:
-            POWERSETS_DICT[n] = cache_list
-            # write to powerset_lookup.csv
-            with open("powerset_lookup.csv", "a") as f:
-                f.write(f"{n}\t{str(cache_list)}\n")
-        area = torch.sum(areas, dim=1)
-        return area
-
-    @staticmethod
     def quasi_monte_carlo_area(multiboxes, points, device):
+        """
+        Computes a soft measure of how many points fall within the boundaries of multiboxes using
+        a quasi-Monte Carlo method enhanced by sigmoid thresholding. Each point's inclusion is assessed
+        in a probabilistic sense relative to each box in the multibox structure.
+
+        Parameters:
+        - multiboxes (NamedTuple): A named tuple with 'min' and 'max' tensors that define the
+                                   minimum and maximum corners of boxes in a multidimensional space.
+                                   The shape of 'min' and 'max' tensors should be [batch_size, boxes_amount, dim].
+        - points (torch.Tensor): A tensor of points in the same dimensional space as the boxes.
+                                 Shape should be [number_of_points, dim].
+        - device (torch.device): The device (e.g., CPU or GPU) to which tensors
+                                                should be transferred for calculation.
+
+        Returns:
+        - torch.Tensor: A tensor of shape [batch_size, number_of_points] representing the soft inclusion score
+                        for each point, relative to the multiboxes, where each entry indicates the maximum
+                        inclusion probability across all boxes for a given point in a given batch.
+
+        This function expands the points tensor to match the dimensions of the multibox tensors, computes
+        the sigmoid of differences between points and box boundaries, and processes these values to
+        derive a probabilistic inclusion score for each point with respect to all boxes. The result is
+        a tensor where higher values indicate a higher probability of a point being considered inside
+        any of the boxes in the multibox.
+        """
         batch_size = multiboxes.min.shape[0]
         boxes_amount = multiboxes.min.shape[1]
         dim = multiboxes.min.shape[2]
         number_of_points = points.shape[0]
 
+        # For each multibox, we calculate the inclusion of each point
         points = (points.unsqueeze(1).expand(batch_size, number_of_points, 1, dim)).to(
             device
         )
+        # For each multibox make a copy of the set of boxes for each point
         multibox_min_expanded = multiboxes.min.unsqueeze(1).expand(
             batch_size, number_of_points, boxes_amount, dim
         )
@@ -192,97 +128,26 @@ class Multiboxes:
         # Hence the mean of the sigmoid > 0.5 if the point is in the box
         differences_min = (points - multibox_min_expanded).sigmoid().unsqueeze(dim=4)
         differences_max = (multibox_max_expanded - points).sigmoid().unsqueeze(dim=4)
-
         differences_cat = torch.cat([differences_min, differences_max], dim=4).mean(
             dim=4
         )
         differences_cat = differences_cat.mean(dim=3)
 
+        # As a multibox is a union of boxes, we only care about the maximum value
         differences_cat = differences_cat.max(dim=2).values
         soft_inclusion = differences_cat
-
-        # intersection_inclusion = torch.cat([multibox["soft_inclusion"].unsqueeze(-1) for multibox in multiboxes], dim=2).mean(dim=2)
-
-        # multibox1 = multiboxes[0]['soft_inclusion']
-        # multibox1 = (multibox1 - 0.5).relu() * multiplier
-
-        #         intersection = (intersection_inclusion - 0.5).relu() * multiplier
 
         return soft_inclusion
 
     @staticmethod
-    def monte_carlo_area(multiboxes1, multiboxes2, device):
-        # Generate random points
-        n = MONTE_CARLO_SAMPLES
-        batch_size = multiboxes1.min.shape[0]
-        boxes_amount_1 = multiboxes1.min.shape[1]
-        boxes_amount_2 = multiboxes2.min.shape[1]
-        dim = multiboxes1.min.shape[2]
-        minimum_value = torch.min(
-            multiboxes1.min.min(dim=1).values, multiboxes2.min.min(dim=1).values
-        )
-        maximum_value = torch.max(
-            multiboxes1.max.max(dim=1).values, multiboxes2.max.max(dim=1).values
-        )
-
-        random_points = torch.rand(batch_size, n, dim).to(device) * (
-            maximum_value.unsqueeze(1) - minimum_value.unsqueeze(1)
-        ) + minimum_value.unsqueeze(1)
-        random_points_unsqueezed = random_points.unsqueeze(2)
-        random_points_unsqueezed = random_points_unsqueezed.to(device)
-
-        multiboxes = [
-            {
-                "min": multiboxes1.min,
-                "max": multiboxes1.max,
-                "boxes_amount": boxes_amount_1,
-            },
-            {
-                "min": multiboxes2.min,
-                "max": multiboxes2.max,
-                "boxes_amount": boxes_amount_2,
-            },
-        ]
-
-        for i in range(2):
-            multibox = multiboxes[i]
-            multibox_min_expanded = (
-                multibox["min"]
-                .unsqueeze(1)
-                .expand(batch_size, n, multibox["boxes_amount"], dim)
-            )
-            multibox_max_expanded = (
-                multibox["max"]
-                .unsqueeze(1)
-                .expand(batch_size, n, multibox["boxes_amount"], dim)
-            )
-
-            differences_min = random_points_unsqueezed - multibox_min_expanded
-            differences_max = multibox_max_expanded - random_points_unsqueezed
-
-            differences_min_sigmoide = torch.sigmoid(differences_min)
-            differences_max_sigmoide = torch.sigmoid(differences_max)
-
-            # collapse the dimensions of every box to get a single value
-            differences_min_sigmoide_mean = differences_min_sigmoide.mean(dim=3)
-            differences_max_sigmoide_mean = differences_max_sigmoide.mean(dim=3)
-
-            # a point is included in a box if the sigmoid of the max and the min differences is greater than 0.5
-            soft_include = torch.min(
-                torch.stack(
-                    [differences_min_sigmoide_mean, differences_max_sigmoide_mean],
-                    dim=3,
-                ),
-                dim=3,
-            ).values
-            # a point is included in a multibox if it is included in at least one of the boxes
-            soft_include_multibox = soft_include.max(dim=2).values
-            multiboxes[i]["soft_include"] = soft_include_multibox
-
-        return [multiboxes[0]["soft_include"], multiboxes[1]["soft_include"]]
-
-    @staticmethod
     def get_existential(d_multiboxes, r_multiboxes, device):
+        """
+        In description logic and ontology
+        ∃R.C = π[R ⊓ π^(-1)(C)]
+        This function computes the preimage of the d_multiboxes
+        and intersects it with the r_multiboxes.
+        Finally, it returns the projection of the intersection
+        """
         batch_size = d_multiboxes.min.shape[0]
         boxes_amount = d_multiboxes.min.shape[1]
         dim = d_multiboxes.min.shape[2]
