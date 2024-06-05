@@ -79,7 +79,7 @@ class MultiBoxELLoadedModel(LoadedModel):
     relation_embeds: torch.Tensor
 
     def get_multiboxes(self, embedding: torch.Tensor, is_relation=False) -> Multiboxes:
-        embedding_dim = self.embedding_dim * 2 if is_relation else self.embedding_size
+        embedding_dim = self.embedding_size * 2 if is_relation else self.embedding_size
         boxes_amount = embedding.shape[1] // embedding_dim
         minimums = []
         maximums = []

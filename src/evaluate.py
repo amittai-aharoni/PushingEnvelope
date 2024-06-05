@@ -186,8 +186,12 @@ def compute_nf2_ranks(model, batch_data, batch_size):
 def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
     centers = (class_multiboxes.max + class_multiboxes.min) / 2
-    c_multiboxes = class_multiboxes[batch_data[:, 0]]
-    d_multiboxes = class_multiboxes[batch_data[:, 1]]
+    c_multiboxes = Multiboxes(
+        class_multiboxes.min[batch_data[:, 0]], class_multiboxes.max[batch_data[:, 0]]
+    )
+    d_multiboxes = Multiboxes(
+        class_multiboxes.min[batch_data[:, 1]], class_multiboxes.max[batch_data[:, 1]]
+    )
 
     intersection = Multiboxes.intersect(c_multiboxes, d_multiboxes, device)
     intersection_centers = (intersection.max + intersection.min) / 2
@@ -270,8 +274,13 @@ def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
     relation_multiboxes = model.get_multiboxes(model.relation_embeds, is_relation=True)
     centers = (class_multiboxes.max + class_multiboxes.min) / 2
 
-    d_multiboxes = class_multiboxes[batch_data[:, 2]]
-    r_multiboxes = relation_multiboxes[batch_data[:, 1]]
+    d_multiboxes = Multiboxes(
+        class_multiboxes.min[batch_data[:, 2]], class_multiboxes.max[batch_data[:, 2]]
+    )
+    r_multiboxes = Multiboxes(
+        relation_multiboxes.min[batch_data[:, 1]],
+        relation_multiboxes.max[batch_data[:, 1]],
+    )
     existential_multiboxes = Multiboxes.get_existential(
         d_multiboxes, r_multiboxes, device
     )
@@ -305,8 +314,13 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
     relation_multiboxes = model.get_multiboxes(model.relation_embeds, is_relation=True)
     centers = (class_multiboxes.max + class_multiboxes.min) / 2
 
-    c_multiboxes = class_multiboxes[batch_data[:, 1]]
-    r_multiboxes = relation_multiboxes[batch_data[:, 0]]
+    c_multiboxes = Multiboxes(
+        class_multiboxes.min[batch_data[:, 1]], class_multiboxes.max[batch_data[:, 1]]
+    )
+    r_multiboxes = Multiboxes(
+        relation_multiboxes.min[batch_data[:, 0]],
+        relation_multiboxes.max[batch_data[:, 0]],
+    )
     existential_multiboxes = Multiboxes.get_existential(
         c_multiboxes, r_multiboxes, device
     )
