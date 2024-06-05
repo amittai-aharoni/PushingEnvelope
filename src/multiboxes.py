@@ -47,7 +47,7 @@ class Multiboxes:
         return Multiboxes(self.min.to(device), self.max.to(device))
 
     @staticmethod
-    def intersect(multiboxes_A, multiboxes_B, device):
+    def intersect(multiboxes_A, multiboxes_B, device, suspicious=True):
         """
         Computes the intersection of two sets of boxes
         """
@@ -66,7 +66,7 @@ class Multiboxes:
         return Multiboxes(
             torch.stack(mins, dim=1),
             torch.stack(maxs, dim=1),
-            suspicious=True,
+            suspicious=suspicious,
             device=device,
         )
 
@@ -140,7 +140,7 @@ class Multiboxes:
         return soft_inclusion
 
     @staticmethod
-    def get_existential(d_multiboxes, r_multiboxes, device):
+    def get_existential(d_multiboxes, r_multiboxes, device, suspicious=True):
         """
         In description logic and ontology
         ∃R.C = π[R ⊓ π^(-1)(C)]
@@ -160,7 +160,7 @@ class Multiboxes:
         d_pre_image_max = torch.concat((top_max, d_multiboxes.max), dim=2)
         d_pre_image_multiboxes = Multiboxes(d_pre_image_min, d_pre_image_max)
         intersection = Multiboxes.intersect(
-            r_multiboxes, d_pre_image_multiboxes, device
+            r_multiboxes, d_pre_image_multiboxes, device, suspicious=suspicious
         )
         dim = intersection.min.shape[2]
         existential_multiboxes_min = intersection.min[:, :, : dim // 2]

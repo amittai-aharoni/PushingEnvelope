@@ -193,10 +193,15 @@ def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
         class_multiboxes.min[batch_data[:, 1]], class_multiboxes.max[batch_data[:, 1]]
     )
 
-    intersection = Multiboxes.intersect(c_multiboxes, d_multiboxes, device)
+    intersection = Multiboxes.intersect(
+        c_multiboxes, d_multiboxes, device, suspicious=False
+    )
     intersection_centers = (intersection.max + intersection.min) / 2
+    boxes_amount_intersection = intersection_centers.shape[1]
+    box_amount = centers.shape[1]
+    boxes_repeat = boxes_amount_intersection // box_amount
     dists = intersection_centers[:, None, :, :] - torch.tile(
-        centers, (batch_size, 1, 1, 1)
+        centers, (batch_size, 1, boxes_repeat, 1)
     )
     dists = torch.linalg.norm(dists, dim=3, ord=2)
     dists = torch.linalg.norm(dists, dim=2, ord=2)
@@ -282,12 +287,15 @@ def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
         relation_multiboxes.max[batch_data[:, 1]],
     )
     existential_multiboxes = Multiboxes.get_existential(
-        d_multiboxes, r_multiboxes, device
+        d_multiboxes, r_multiboxes, device, suspicious=False
     )
 
     existential_centers = (existential_multiboxes.max + existential_multiboxes.min) / 2
+    boxes_amount_existential = existential_centers.shape[1]
+    box_amount = centers.shape[1]
+    boxes_repeat = boxes_amount_existential // box_amount
     dists = existential_centers[:, None, :, :] - torch.tile(
-        centers, (batch_size, 1, 1, 1)
+        centers, (batch_size, 1, boxes_repeat, 1)
     )
     dists = torch.linalg.norm(dists, dim=3, ord=2)
     dists = torch.linalg.norm(dists, dim=2, ord=2)
@@ -322,12 +330,16 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
         relation_multiboxes.max[batch_data[:, 0]],
     )
     existential_multiboxes = Multiboxes.get_existential(
-        c_multiboxes, r_multiboxes, device
+        c_multiboxes, r_multiboxes, device, suspicious=False
     )
 
     existential_centers = (existential_multiboxes.max + existential_multiboxes.min) / 2
+    existential_centers = (existential_multiboxes.max + existential_multiboxes.min) / 2
+    boxes_amount_existential = existential_centers.shape[1]
+    box_amount = centers.shape[1]
+    boxes_repeat = boxes_amount_existential // box_amount
     dists = existential_centers[:, None, :, :] - torch.tile(
-        centers, (batch_size, 1, 1, 1)
+        centers, (batch_size, 1, boxes_repeat, 1)
     )
     dists = torch.linalg.norm(dists, dim=3, ord=2)
     dists = torch.linalg.norm(dists, dim=2, ord=2)
