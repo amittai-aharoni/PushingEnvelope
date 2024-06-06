@@ -138,7 +138,7 @@ def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
 
     dists = batch_centers[:, None, :, :] - torch.tile(centers, (batch_size, 1, 1, 1))
     dists = torch.linalg.norm(dists, dim=3, ord=2)
-    dists = torch.linalg.norm(dists, dim=2, ord=2)
+    dists = torch.min(dists, dim=2).values
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 1])
 
@@ -204,7 +204,7 @@ def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
         centers, (batch_size, 1, boxes_repeat, 1)
     )
     dists = torch.linalg.norm(dists, dim=3, ord=2)
-    dists = torch.linalg.norm(dists, dim=2, ord=2)
+    dists = torch.min(dists, dim=2).values
     dists.scatter_(
         1, batch_data[:, 0].reshape(-1, 1), torch.inf
     )  # filter out c n d <= c
@@ -298,7 +298,7 @@ def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
         centers, (batch_size, 1, boxes_repeat, 1)
     )
     dists = torch.linalg.norm(dists, dim=3, ord=2)
-    dists = torch.linalg.norm(dists, dim=2, ord=2)
+    dists = torch.min(dists, dim=2).values
     return dists_to_ranks(dists, batch_data[:, 0])
 
 
@@ -342,7 +342,7 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
         centers, (batch_size, 1, boxes_repeat, 1)
     )
     dists = torch.linalg.norm(dists, dim=3, ord=2)
-    dists = torch.linalg.norm(dists, dim=2, ord=2)
+    dists = torch.min(dists, dim=2).values
     return dists_to_ranks(dists, batch_data[:, 2])
 
 
