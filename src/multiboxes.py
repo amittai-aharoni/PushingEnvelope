@@ -116,25 +116,69 @@ class Multiboxes:
         points = (points.unsqueeze(1).expand(batch_size, number_of_points, 1, dim)).to(
             device
         )
-        # For each multibox make a copy of the set of boxes for each point
-        multibox_min_expanded = multiboxes.min.unsqueeze(1).expand(
-            batch_size, number_of_points, boxes_amount, dim
-        )
-        multibox_max_expanded = multiboxes.max.unsqueeze(1).expand(
-            batch_size, number_of_points, boxes_amount, dim
-        )
+
         # for each dimension, if sigmoid > 0.5, then the point is in the bounds
         # of the box for that dimension
         # Hence the mean of the sigmoid > 0.5 if the point is in the box
-        differences_min = (points - multibox_min_expanded).sigmoid().unsqueeze(dim=4)
-        differences_max = (multibox_max_expanded - points).sigmoid().unsqueeze(dim=4)
-        differences_cat = torch.cat([differences_min, differences_max], dim=4).mean(
-            dim=4
+        # For each multibox make a copy of the set of boxes for each point
+        multibox_expanded = multiboxes.min.unsqueeze(1).expand(
+            batch_size, number_of_points, boxes_amount, dim
         )
-        differences_cat = differences_cat.mean(dim=3)
+        # Assume `points` and `multibox_expanded` are your original tensors
+        # Split the tensors into smaller chunks
+        points_chunks = torch.chunk(points, chunks=100, dim=0)
+        multibox_min_expanded_chunks = torch.chunk(multibox_expanded, chunks=100, dim=0)
+        multibox_expanded = multiboxes.max.unsqueeze(1).expand(
+            batch_size, number_of_points, boxes_amount, dim
+        )
+        multibox_max_expanded_chunks = torch.chunk(multibox_expanded, chunks=100, dim=0)
+        results = []
+        for (
+            points_chunk,
+            multibox_min_expanded_chunk,
+            multibox_max_expanded_chunk,
+        ) in zip(
+            points_chunks, multibox_min_expanded_chunks, multibox_max_expanded_chunks
+        ):
+            result_chunk = (
+                (points_chunk - multibox_min_expanded_chunk).sigmoid().unsqueeze(dim=4)
+            )
+            result_chunk.add(
+                (multibox_max_expanded_chunk.sub(points_chunk))
+                .sigmoid()
+                .unsqueeze(dim=4)
+            ).div(2)
+            result_chunk = result_chunk.max(dim=2).values
+            results.append(result_chunk)
+        differences_cat = torch.cat(results, dim=0)
+
+        # # List to store the results
+        # results = []
+        # # Perform the subtraction and sigmoid operation on each chunk separately
+        # for points_chunk, multibox_expanded_chunk in zip(points_chunks, multibox_expanded_chunks):
+        #     result_chunk = (points_chunk - multibox_expanded_chunk).sigmoid().unsqueeze(dim=4)
+        #     results.append(result_chunk)
+        # # Concatenate the results back together
+        # differences = torch.cat(results, dim=0)
+        #
+        # # differences = (points - multibox_expanded).sigmoid().unsqueeze(dim=4)
+        # # differences = (multibox_expanded.sub(points).mul(-1).sigmoid().unsqueeze(dim=4))
+        # multibox_expanded = multiboxes.max.unsqueeze(1).expand(
+        #     batch_size, number_of_points, boxes_amount, dim
+        # )
+        # multibox_expanded_chunks = torch.chunk(multibox_expanded, chunks=50, dim=0)
+        # points_chunks = torch.chunk(points, chunks=50, dim=0)
+        # results = []
+        # # Perform the subtraction and sigmoid operation on each chunk separately
+        # for points_chunk, multibox_expanded_chunk in zip(points_chunks, multibox_expanded_chunks):
+        #     result_chunk = (multibox_expanded_chunk - points_chunk).sigmoid().unsqueeze(dim=4)
+        #     results.append(result_chunk)
+        # differences = differences.add(
+        #     torch.cat(results, dim=0)
+        # ).div(2)
 
         # As a multibox is a union of boxes, we only care about the maximum value
-        differences_cat = differences_cat.max(dim=2).values
+        # differences_cat = differences.max(dim=2).values
         soft_inclusion = differences_cat
 
         return soft_inclusion
