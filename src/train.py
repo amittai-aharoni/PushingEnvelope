@@ -22,6 +22,7 @@ from src.config import (
     PARAMS,
     PROJECT_NAME,
     NUM_BOXES_PER_CLASS,
+    DATA_CHUNKS,
 )
 from src.evaluate import compute_ranks, evaluate
 
@@ -201,37 +202,44 @@ def train(
         for epoch in trange(num_epochs):
             if model.negative_sampling:
                 sample_negatives(data, num_neg)
-            loss = model(data)
-            if epoch % val_freq == 0 and val_data is not None:
-                ranking = compute_ranks(
-                    model.to_loaded_model(), val_data, num_classes, "nf1", model.device
-                )
-                wandb.log(
-                    {
-                        "top10": ranking.top10 / len(ranking),
-                        "top100": ranking.top100 / len(ranking),
-                        "mean_rank": np.mean(ranking.ranks),
-                        "median_rank": np.median(ranking.ranks),
-                    },
-                    commit=False,
-                )
-                # if ranking.top100 >= best_top100:
-                if np.median(ranking.ranks) <= best_median:
-                    # if np.mean(ranking.ranks) <= best_mean:
-                    # best_top10 = ranking.top10
-                    # best_top100 = ranking.top100
-                    best_median = np.median(ranking.ranks)
-                    # best_mean = np.mean(ranking.ranks)
-                    best_epoch = epoch
-                    model.save(out_folder, best=True)
+            data = shuffle_data(data)
+            divided_data = divide_data(data, DATA_CHUNKS)
+            for chunk in divided_data:
+                loss = model(chunk)
+                if epoch % val_freq == 0 and val_data is not None:
+                    ranking = compute_ranks(
+                        model.to_loaded_model(),
+                        val_data,
+                        num_classes,
+                        "nf1",
+                        model.device,
+                    )
+                    wandb.log(
+                        {
+                            "top10": ranking.top10 / len(ranking),
+                            "top100": ranking.top100 / len(ranking),
+                            "mean_rank": np.mean(ranking.ranks),
+                            "median_rank": np.median(ranking.ranks),
+                        },
+                        commit=False,
+                    )
+                    # if ranking.top100 >= best_top100:
+                    if np.median(ranking.ranks) <= best_median:
+                        # if np.mean(ranking.ranks) <= best_mean:
+                        # best_top10 = ranking.top10
+                        # best_top100 = ranking.top100
+                        best_median = np.median(ranking.ranks)
+                        # best_mean = np.mean(ranking.ranks)
+                        best_epoch = epoch
+                        model.save(out_folder, best=True)
 
-            wandb.log({"loss": loss})
+                wandb.log({"loss": loss})
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            if scheduler is not None:
-                scheduler.step()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                if scheduler is not None:
+                    scheduler.step()
     except KeyboardInterrupt:
         print("Interrupted. Stopping training...")
 
@@ -248,6 +256,27 @@ def sample_negatives(data, num_neg):
         new_heads = torch.cat([randoms[:, 1].reshape(-1, 1), nf3[:, [1, 2]]], dim=1)
         new_neg = torch.cat([new_tails, new_heads], dim=0)
         data[f"nf3_neg{i}"] = new_neg
+
+
+def shuffle_data(data):
+    for key in data:
+        perm = torch.randperm(data[key].size(0))
+        data[key] = data[key][perm]
+    return data
+
+
+def divide_data(data, num_chunks):
+    divided_data = [dict() for _ in range(num_chunks)]
+    for key, tensor in data.items():
+        if tensor.size(0) < num_chunks:
+            for i in range(num_chunks):
+                divided_data[i][key] = tensor.clone()
+            continue
+        chunks = torch.chunk(tensor, num_chunks)
+        for i, chunk in enumerate(chunks):
+            divided_data[i][key] = chunk
+
+    return divided_data
 
 
 if __name__ == "__main__":

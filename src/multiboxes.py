@@ -140,13 +140,9 @@ class Multiboxes:
         ) in zip(
             points_chunks, multibox_min_expanded_chunks, multibox_max_expanded_chunks
         ):
-            result_chunk = (
-                (points_chunk - multibox_min_expanded_chunk).sigmoid().unsqueeze(dim=4)
-            )
+            result_chunk = (points_chunk - multibox_min_expanded_chunk).sigmoid()
             result_chunk.add(
-                (multibox_max_expanded_chunk.sub(points_chunk))
-                .sigmoid()
-                .unsqueeze(dim=4)
+                (multibox_max_expanded_chunk.sub(points_chunk)).sigmoid()
             ).div(2)
             result_chunk = result_chunk.max(dim=2).values
             results.append(result_chunk)

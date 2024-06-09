@@ -7,6 +7,7 @@ ROOT_PATH = os.path.dirname(os.path.abspath(__file__))
 PROJECT_NAME = "PushingEnvelope"
 
 DEFAULT_DATASET = "GALEN"
+DATA_CHUNKS = 100
 DEFAULT_EPOCHS = 1
 DEFAULT_NUM_NEG = 1
 NUM_BOXES_PER_CLASS = 7
