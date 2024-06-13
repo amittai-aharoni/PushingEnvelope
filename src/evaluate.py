@@ -14,6 +14,7 @@ from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device
 
 logging.basicConfig(level=logging.INFO)
+num_points = 1000
 
 
 def main():
@@ -69,6 +70,16 @@ def evaluate(dataset, task, model_name, embedding_size, best=True, split="test")
     return rankings
 
 
+def generate_uniform_points(min, max, num_points, device):
+    # Generate a tensor with the shape (n, num_points, d), filled with random numbers between 0 and 1
+    rand_tensor = torch.rand(*min.shape[:-1], num_points, min.shape[-1]).to(device)
+
+    # Scale and shift the distribution to be between min and max
+    points = min.unsqueeze(-2) + (max - min).unsqueeze(-2) * rand_tensor
+
+    return points
+
+
 def combine_rankings(rankings, num_classes):
     combined_ranking = RankingResult(0, 0, 0, [], 0)
     for ranking in rankings:
@@ -113,6 +124,7 @@ def compute_ranks(
         top1 += (batch_ranks <= 1).sum()
         top10 += (batch_ranks <= 10).sum()
         top100 += (batch_ranks <= 100).sum()
+        print(f"Top 1: {top1}, Top 10: {top10}, Top 100: {top100} for {nf}")
         ranks += batch_ranks.tolist()
 
     ranks_dict = Counter(ranks)
@@ -133,12 +145,32 @@ def compute_nf1_ranks(model, batch_data, batch_size, device=None):
 
 def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
-    centers = (class_multiboxes.max + class_multiboxes.min) / 2
-    batch_centers = centers[batch_data[:, 0]]
+    num_classes = class_multiboxes.min.shape[0]
+    num_of_boxes = class_multiboxes.min.shape[1]
+    dim = class_multiboxes.min.shape[2]
+    batch_mins = class_multiboxes.min[batch_data[:, 0]]
+    batch_maxs = class_multiboxes.max[batch_data[:, 0]]
 
-    dists = batch_centers[:, None, :, :] - torch.tile(centers, (batch_size, 1, 1, 1))
-    dists = torch.linalg.norm(dists, dim=3, ord=2)
-    dists = torch.min(dists, dim=2).values
+    results = []
+    for i in range(batch_size):
+        min = batch_mins[i]
+        max = batch_maxs[i]
+        points = generate_uniform_points(min, max, num_points, device=device)
+        points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
+        mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
+            num_classes, num_of_boxes, 1, dim
+        )
+        maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
+            num_classes, num_of_boxes, 1, dim
+        )
+        lower_bound = (points_expanded - mins_expanded).min(dim=3).values
+        upper_bound = (maxs_expanded - points_expanded).min(dim=3).values
+        inclusion = torch.min(lower_bound, upper_bound)
+        sign_tensor = torch.sign(inclusion)
+        binary_tensor = torch.clamp(sign_tensor, 0, 1)
+        positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+        results.append(positive_entries)
+    dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 1])
 
@@ -185,32 +217,43 @@ def compute_nf2_ranks(model, batch_data, batch_size):
 
 def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
-    centers = (class_multiboxes.max + class_multiboxes.min) / 2
+    num_classes = class_multiboxes.min.shape[0]
+    num_of_boxes = class_multiboxes.min.shape[1]
+    dim = class_multiboxes.min.shape[2]
     c_multiboxes = Multiboxes(
         class_multiboxes.min[batch_data[:, 0]], class_multiboxes.max[batch_data[:, 0]]
     )
     d_multiboxes = Multiboxes(
         class_multiboxes.min[batch_data[:, 1]], class_multiboxes.max[batch_data[:, 1]]
     )
-
     intersection = Multiboxes.intersect(
         c_multiboxes, d_multiboxes, device, suspicious=False
     )
-    intersection_centers = (intersection.max + intersection.min) / 2
-    boxes_amount_intersection = intersection_centers.shape[1]
-    box_amount = centers.shape[1]
-    boxes_repeat = boxes_amount_intersection // box_amount
-    dists = intersection_centers[:, None, :, :] - torch.tile(
-        centers, (batch_size, 1, boxes_repeat, 1)
-    )
-    dists = torch.linalg.norm(dists, dim=3, ord=2)
-    dists = torch.min(dists, dim=2).values
-    dists.scatter_(
-        1, batch_data[:, 0].reshape(-1, 1), torch.inf
-    )  # filter out c n d <= c
-    dists.scatter_(
-        1, batch_data[:, 1].reshape(-1, 1), torch.inf
-    )  # filter out c n d <= d
+    batch_mins = intersection.min
+    batch_maxs = intersection.max
+    results = []
+    for i in range(batch_size):
+        min = batch_mins[i]
+        max = batch_maxs[i]
+        points = generate_uniform_points(min, max, num_points, device=device)
+        points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
+        num_boxes_intersection = batch_mins.shape[1]
+        boxes_repeat = num_boxes_intersection // num_of_boxes
+        mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
+            num_classes, boxes_repeat, 1, dim
+        )
+        maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
+            num_classes, boxes_repeat, 1, dim
+        )
+        lower_bound = (points_expanded - mins_expanded).min(dim=3).values
+        upper_bound = (maxs_expanded - points_expanded).min(dim=3).values
+        inclusion = torch.min(lower_bound, upper_bound)
+        sign_tensor = torch.sign(inclusion)
+        binary_tensor = torch.clamp(sign_tensor, 0, 1)
+        positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+        results.append(positive_entries)
+    dists = torch.stack(results)
+    dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 2])
 
 
@@ -276,8 +319,10 @@ def compute_nf3_ranks(model, batch_data, batch_size, device=None):
 
 def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
+    num_classes = class_multiboxes.min.shape[0]
+    num_of_boxes = class_multiboxes.min.shape[1]
+    dim = class_multiboxes.min.shape[2]
     relation_multiboxes = model.get_multiboxes(model.relation_embeds, is_relation=True)
-    centers = (class_multiboxes.max + class_multiboxes.min) / 2
 
     d_multiboxes = Multiboxes(
         class_multiboxes.min[batch_data[:, 2]], class_multiboxes.max[batch_data[:, 2]]
@@ -289,16 +334,30 @@ def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
     existential_multiboxes = Multiboxes.get_existential(
         d_multiboxes, r_multiboxes, device, suspicious=False
     )
+    num_queries = existential_multiboxes.min.shape[0]
 
-    existential_centers = (existential_multiboxes.max + existential_multiboxes.min) / 2
-    boxes_amount_existential = existential_centers.shape[1]
-    box_amount = centers.shape[1]
-    boxes_repeat = boxes_amount_existential // box_amount
-    dists = existential_centers[:, None, :, :] - torch.tile(
-        centers, (batch_size, 1, boxes_repeat, 1)
-    )
-    dists = torch.linalg.norm(dists, dim=3, ord=2)
-    dists = torch.min(dists, dim=2).values
+    results = []
+    for i in range(num_classes):
+        min = class_multiboxes.min[i]
+        max = class_multiboxes.max[i]
+        points = generate_uniform_points(min, max, num_points, device=device)
+        points_expanded = points.unsqueeze(0).repeat(num_queries, 1, 1, 1)
+        num_existential_boxes = existential_multiboxes.min.shape[1]
+        boxes_repeat = num_existential_boxes // num_of_boxes
+        mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
+            num_queries, boxes_repeat, 1, dim
+        )
+        maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
+            num_queries, boxes_repeat, 1, dim
+        )
+        lower_bound = (points_expanded - mins_expanded).min(dim=3).values
+        upper_bound = (maxs_expanded - points_expanded).min(dim=3).values
+        inclusion = torch.min(lower_bound, upper_bound)
+        sign_tensor = torch.sign(inclusion)
+        binary_tensor = torch.clamp(sign_tensor, 0, 1)
+        positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+        results.append(positive_entries)
+    dists = torch.stack(results)
     return dists_to_ranks(dists, batch_data[:, 0])
 
 
@@ -319,8 +378,10 @@ def compute_nf4_ranks(model, batch_data, batch_size, device=None):
 
 def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
+    num_classes = class_multiboxes.min.shape[0]
+    num_of_boxes = class_multiboxes.min.shape[1]
+    dim = class_multiboxes.min.shape[2]
     relation_multiboxes = model.get_multiboxes(model.relation_embeds, is_relation=True)
-    centers = (class_multiboxes.max + class_multiboxes.min) / 2
 
     c_multiboxes = Multiboxes(
         class_multiboxes.min[batch_data[:, 1]], class_multiboxes.max[batch_data[:, 1]]
@@ -332,17 +393,32 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
     existential_multiboxes = Multiboxes.get_existential(
         c_multiboxes, r_multiboxes, device, suspicious=False
     )
+    batch_mins = existential_multiboxes.min
+    batch_maxs = existential_multiboxes.max
+    results = []
+    for i in range(batch_size):
+        min = batch_mins[i]
+        max = batch_maxs[i]
+        points = generate_uniform_points(min, max, num_points, device=device)
+        points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
+        num_boxes_intersection = batch_mins.shape[1]
+        boxes_repeat = num_boxes_intersection // num_of_boxes
+        mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
+            num_classes, boxes_repeat, 1, dim
+        )
+        maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
+            num_classes, boxes_repeat, 1, dim
+        )
+        lower_bound = (points_expanded - mins_expanded).min(dim=3).values
+        upper_bound = (maxs_expanded - points_expanded).min(dim=3).values
+        inclusion = torch.min(lower_bound, upper_bound)
+        sign_tensor = torch.sign(inclusion)
+        binary_tensor = torch.clamp(sign_tensor, 0, 1)
+        positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+        results.append(positive_entries)
+    dists = torch.stack(results)
+    dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
 
-    existential_centers = (existential_multiboxes.max + existential_multiboxes.min) / 2
-    existential_centers = (existential_multiboxes.max + existential_multiboxes.min) / 2
-    boxes_amount_existential = existential_centers.shape[1]
-    box_amount = centers.shape[1]
-    boxes_repeat = boxes_amount_existential // box_amount
-    dists = existential_centers[:, None, :, :] - torch.tile(
-        centers, (batch_size, 1, boxes_repeat, 1)
-    )
-    dists = torch.linalg.norm(dists, dim=3, ord=2)
-    dists = torch.min(dists, dim=2).values
     return dists_to_ranks(dists, batch_data[:, 2])
 
 

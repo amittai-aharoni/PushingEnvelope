@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 from torch.optim.lr_scheduler import MultiStepLR
-from tqdm import trange
+from tqdm import trange, tqdm
 
 from src.config import (
     DATASETS,
@@ -204,9 +204,11 @@ def train(
                 sample_negatives(data, num_neg)
             data = shuffle_data(data)
             divided_data = divide_data(data, DATA_CHUNKS)
-            for chunk in divided_data:
+            i = 0
+            for chunk in tqdm(divided_data):
+                i += 1
                 loss = model(chunk)
-                if epoch % val_freq == 0 and val_data is not None:
+                if i % val_freq == 0 and val_data is not None:
                     ranking = compute_ranks(
                         model.to_loaded_model(),
                         val_data,

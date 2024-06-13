@@ -127,12 +127,24 @@ class Multiboxes:
         multibox_max_expanded = multiboxes.max.unsqueeze(1).expand(
             batch_size, number_of_points, boxes_amount, dim
         )
-        lower_bound = (points - multibox_min_expanded).sigmoid().unsqueeze(dim=4)
-        upper_bound = (multibox_max_expanded - points).sigmoid().unsqueeze(dim=4)
-        differences_cat = torch.cat([lower_bound, upper_bound], dim=4).mean(dim=4)
-        differences_cat = differences_cat.mean(dim=3)
-        differences_cat = differences_cat.max(dim=2).values
-        soft_inclusion = differences_cat
+
+        multibox_min_expanded_chuncked = multibox_min_expanded.chunk(batch_size, dim=0)
+        multibox_max_expanded_chuncked = multibox_max_expanded.chunk(batch_size, dim=0)
+        points_chuncked = points.chunk(batch_size, dim=0)
+
+        differences_mean = []
+        for i in range(5):
+            lower_bound = (
+                points_chuncked[i] - multibox_min_expanded_chuncked[i]
+            ).sigmoid()
+            upper_bound = (
+                multibox_max_expanded_chuncked[i] - points_chuncked[i]
+            ).sigmoid()
+            differences_mean.append(
+                upper_bound.add(lower_bound).div(2).max(dim=2).values
+            )
+
+        soft_inclusion = torch.cat(differences_mean, dim=0)
 
         return soft_inclusion
 
