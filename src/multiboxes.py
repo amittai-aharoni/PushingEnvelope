@@ -133,7 +133,7 @@ class Multiboxes:
         points_chuncked = points.chunk(batch_size, dim=0)
 
         differences_mean = []
-        for i in range(5):
+        for i in range(batch_size):
             lower_bound = (
                 points_chuncked[i] - multibox_min_expanded_chuncked[i]
             ).sigmoid()

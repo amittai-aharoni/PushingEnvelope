@@ -14,7 +14,7 @@ from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device
 
 logging.basicConfig(level=logging.INFO)
-num_points = 1000
+num_points = 200
 
 
 def main():
@@ -163,13 +163,24 @@ def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
         maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
             num_classes, num_of_boxes, 1, dim
         )
-        lower_bound = (points_expanded - mins_expanded).min(dim=3).values
-        upper_bound = (maxs_expanded - points_expanded).min(dim=3).values
-        inclusion = torch.min(lower_bound, upper_bound)
-        sign_tensor = torch.sign(inclusion)
-        binary_tensor = torch.clamp(sign_tensor, 0, 1)
-        positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
-        results.append(positive_entries)
+        mins_expanded_chuncked = torch.chunk(mins_expanded, num_classes, dim=0)
+        maxs_expanded_chuncked = torch.chunk(maxs_expanded, num_classes, dim=0)
+        points_chuncked = torch.chunk(points_expanded, num_classes, dim=0)
+        inclusions = []
+        for i in range(num_classes):
+            lower_bound = (
+                (points_chuncked[i] - mins_expanded_chuncked[i]).min(dim=3).values
+            )
+            upper_bound = (
+                (maxs_expanded_chuncked[i] - points_chuncked[i]).min(dim=3).values
+            )
+            inclusion = torch.min(lower_bound, upper_bound)
+            sign_tensor = torch.sign(inclusion)
+            binary_tensor = torch.clamp(sign_tensor, 0, 1)
+            positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+            inclusions.append(positive_entries)
+        inclusions = torch.cat(results, dim=0)
+        results.append(inclusions)
     dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 1])
@@ -245,13 +256,28 @@ def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
         maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
             num_classes, boxes_repeat, 1, dim
         )
-        lower_bound = (points_expanded - mins_expanded).min(dim=3).values
-        upper_bound = (maxs_expanded - points_expanded).min(dim=3).values
-        inclusion = torch.min(lower_bound, upper_bound)
-        sign_tensor = torch.sign(inclusion)
-        binary_tensor = torch.clamp(sign_tensor, 0, 1)
-        positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
-        results.append(positive_entries)
+        points_expanded_chunked = torch.chunk(points_expanded, num_classes, dim=0)
+        mins_expanded_chunked = torch.chunk(mins_expanded, num_classes, dim=0)
+        maxs_expanded_chunked = torch.chunk(maxs_expanded, num_classes, dim=0)
+        inclusions = []
+        for i in range(num_classes):
+            lower_bound = (
+                (points_expanded_chunked[i] - mins_expanded_chunked[i])
+                .min(dim=3)
+                .values
+            )
+            upper_bound = (
+                (maxs_expanded_chunked[i] - points_expanded_chunked[i])
+                .min(dim=3)
+                .values
+            )
+            inclusion = torch.min(lower_bound, upper_bound)
+            sign_tensor = torch.sign(inclusion)
+            binary_tensor = torch.clamp(sign_tensor, 0, 1)
+            positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+            inclusions.append(positive_entries)
+        inclusions = torch.cat(inclusions, dim=0)
+        results.append(inclusions)
     dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 2])
@@ -350,13 +376,28 @@ def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
         maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
             num_queries, boxes_repeat, 1, dim
         )
-        lower_bound = (points_expanded - mins_expanded).min(dim=3).values
-        upper_bound = (maxs_expanded - points_expanded).min(dim=3).values
-        inclusion = torch.min(lower_bound, upper_bound)
-        sign_tensor = torch.sign(inclusion)
-        binary_tensor = torch.clamp(sign_tensor, 0, 1)
-        positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
-        results.append(positive_entries)
+        points_expanded_chunked = torch.chunk(points_expanded, num_queries, dim=0)
+        mins_expanded_chunked = torch.chunk(mins_expanded, num_queries, dim=0)
+        maxs_expanded_chunked = torch.chunk(maxs_expanded, num_queries, dim=0)
+        inclusions = []
+        for i in range(num_queries):
+            lower_bound = (
+                (points_expanded_chunked[i] - mins_expanded_chunked[i])
+                .min(dim=3)
+                .values
+            )
+            upper_bound = (
+                (maxs_expanded_chunked[i] - points_expanded_chunked[i])
+                .min(dim=3)
+                .values
+            )
+            inclusion = torch.min(lower_bound, upper_bound)
+            sign_tensor = torch.sign(inclusion)
+            binary_tensor = torch.clamp(sign_tensor, 0, 1)
+            positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+            inclusions.append(positive_entries)
+        inclusions = torch.cat(inclusions, dim=0)
+        results.append(inclusions)
     dists = torch.stack(results)
     return dists_to_ranks(dists, batch_data[:, 0])
 
@@ -409,13 +450,28 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
         maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
             num_classes, boxes_repeat, 1, dim
         )
-        lower_bound = (points_expanded - mins_expanded).min(dim=3).values
-        upper_bound = (maxs_expanded - points_expanded).min(dim=3).values
-        inclusion = torch.min(lower_bound, upper_bound)
-        sign_tensor = torch.sign(inclusion)
-        binary_tensor = torch.clamp(sign_tensor, 0, 1)
-        positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
-        results.append(positive_entries)
+        points_expanded_chunked = torch.chunk(points_expanded, num_classes, dim=0)
+        mins_expanded_chunked = torch.chunk(mins_expanded, num_classes, dim=0)
+        maxs_expanded_chunked = torch.chunk(maxs_expanded, num_classes, dim=0)
+        inclusions = []
+        for i in range(num_classes):
+            lower_bound = (
+                (points_expanded_chunked[i] - mins_expanded_chunked[i])
+                .min(dim=3)
+                .values
+            )
+            upper_bound = (
+                (maxs_expanded_chunked[i] - points_expanded_chunked[i])
+                .min(dim=3)
+                .values
+            )
+            inclusion = torch.min(lower_bound, upper_bound)
+            sign_tensor = torch.sign(inclusion)
+            binary_tensor = torch.clamp(sign_tensor, 0, 1)
+            positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+            inclusions.append(positive_entries)
+        inclusions = torch.cat(inclusions, dim=0)
+        results.append(inclusions)
     dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
 
