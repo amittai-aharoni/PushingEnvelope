@@ -277,6 +277,9 @@ def divide_data(data, num_chunks):
         chunks = torch.chunk(tensor, num_chunks)
         for i, chunk in enumerate(chunks):
             divided_data[i][key] = chunk
+        if len(chunks) < num_chunks:
+            for i in range(len(chunks), num_chunks):
+                divided_data[i][key] = chunks[-1]
 
     return divided_data
 
