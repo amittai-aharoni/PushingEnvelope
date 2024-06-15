@@ -5,7 +5,7 @@ from collections import Counter
 import numpy as np
 import torch
 import torch.nn.functional as F
-from tqdm import trange
+from tqdm import trange, tqdm
 
 from src.model.loaded_models import BoxELLoadedModel, LoadedModel, MultiBoxELLoadedModel
 from src.multiboxes import Multiboxes
@@ -14,7 +14,8 @@ from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device
 
 logging.basicConfig(level=logging.INFO)
-num_points = 200
+num_points = 50
+number_chunks = 10
 
 
 def main():
@@ -146,13 +147,14 @@ def compute_nf1_ranks(model, batch_data, batch_size, device=None):
 def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
     num_classes = class_multiboxes.min.shape[0]
+    chunk_size = int(num_classes // number_chunks)
     num_of_boxes = class_multiboxes.min.shape[1]
     dim = class_multiboxes.min.shape[2]
     batch_mins = class_multiboxes.min[batch_data[:, 0]]
     batch_maxs = class_multiboxes.max[batch_data[:, 0]]
 
     results = []
-    for i in range(batch_size):
+    for i in tqdm(range(batch_size)):
         min = batch_mins[i]
         max = batch_maxs[i]
         points = generate_uniform_points(min, max, num_points, device=device)
@@ -163,9 +165,9 @@ def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
         maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
             num_classes, num_of_boxes, 1, dim
         )
-        mins_expanded_chuncked = torch.chunk(mins_expanded, num_classes, dim=0)
-        maxs_expanded_chuncked = torch.chunk(maxs_expanded, num_classes, dim=0)
-        points_chuncked = torch.chunk(points_expanded, num_classes, dim=0)
+        mins_expanded_chuncked = torch.chunk(mins_expanded, chunk_size, dim=0)
+        maxs_expanded_chuncked = torch.chunk(maxs_expanded, chunk_size, dim=0)
+        points_chuncked = torch.chunk(points_expanded, chunk_size, dim=0)
         inclusions = []
         for i in range(num_classes):
             lower_bound = (
@@ -179,8 +181,8 @@ def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
             binary_tensor = torch.clamp(sign_tensor, 0, 1)
             positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
             inclusions.append(positive_entries)
-        inclusions = torch.cat(results, dim=0)
-        results.append(inclusions)
+        inclusion_results = torch.cat(inclusions, dim=0)
+        results.append(inclusion_results)
     dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 1])
@@ -229,6 +231,7 @@ def compute_nf2_ranks(model, batch_data, batch_size):
 def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
     num_classes = class_multiboxes.min.shape[0]
+    chunk_size = int(num_classes // number_chunks)
     num_of_boxes = class_multiboxes.min.shape[1]
     dim = class_multiboxes.min.shape[2]
     c_multiboxes = Multiboxes(
@@ -243,7 +246,7 @@ def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
     batch_mins = intersection.min
     batch_maxs = intersection.max
     results = []
-    for i in range(batch_size):
+    for i in tqdm(range(batch_size)):
         min = batch_mins[i]
         max = batch_maxs[i]
         points = generate_uniform_points(min, max, num_points, device=device)
@@ -256,9 +259,9 @@ def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
         maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
             num_classes, boxes_repeat, 1, dim
         )
-        points_expanded_chunked = torch.chunk(points_expanded, num_classes, dim=0)
-        mins_expanded_chunked = torch.chunk(mins_expanded, num_classes, dim=0)
-        maxs_expanded_chunked = torch.chunk(maxs_expanded, num_classes, dim=0)
+        points_expanded_chunked = torch.chunk(points_expanded, chunk_size, dim=0)
+        mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
+        maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         inclusions = []
         for i in range(num_classes):
             lower_bound = (
@@ -276,8 +279,8 @@ def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
             binary_tensor = torch.clamp(sign_tensor, 0, 1)
             positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
             inclusions.append(positive_entries)
-        inclusions = torch.cat(inclusions, dim=0)
-        results.append(inclusions)
+        inclusion_results = torch.cat(inclusions, dim=0)
+        results.append(inclusion_results)
     dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 2])
@@ -346,6 +349,7 @@ def compute_nf3_ranks(model, batch_data, batch_size, device=None):
 def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
     num_classes = class_multiboxes.min.shape[0]
+    # chunk_size = int(num_classes // number_chunks)
     num_of_boxes = class_multiboxes.min.shape[1]
     dim = class_multiboxes.min.shape[2]
     relation_multiboxes = model.get_multiboxes(model.relation_embeds, is_relation=True)
@@ -363,7 +367,7 @@ def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
     num_queries = existential_multiboxes.min.shape[0]
 
     results = []
-    for i in range(num_classes):
+    for i in tqdm(range(num_classes)):
         min = class_multiboxes.min[i]
         max = class_multiboxes.max[i]
         points = generate_uniform_points(min, max, num_points, device=device)
@@ -396,8 +400,8 @@ def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
             binary_tensor = torch.clamp(sign_tensor, 0, 1)
             positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
             inclusions.append(positive_entries)
-        inclusions = torch.cat(inclusions, dim=0)
-        results.append(inclusions)
+        inclusion_results = torch.cat(inclusions, dim=0)
+        results.append(inclusion_results)
     dists = torch.stack(results)
     return dists_to_ranks(dists, batch_data[:, 0])
 
@@ -420,6 +424,7 @@ def compute_nf4_ranks(model, batch_data, batch_size, device=None):
 def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
     class_multiboxes = model.get_multiboxes(model.class_embeds)
     num_classes = class_multiboxes.min.shape[0]
+    chunk_size = int(num_classes // number_chunks)
     num_of_boxes = class_multiboxes.min.shape[1]
     dim = class_multiboxes.min.shape[2]
     relation_multiboxes = model.get_multiboxes(model.relation_embeds, is_relation=True)
@@ -437,7 +442,7 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
     batch_mins = existential_multiboxes.min
     batch_maxs = existential_multiboxes.max
     results = []
-    for i in range(batch_size):
+    for i in tqdm(range(batch_size)):
         min = batch_mins[i]
         max = batch_maxs[i]
         points = generate_uniform_points(min, max, num_points, device=device)
@@ -450,9 +455,9 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
         maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
             num_classes, boxes_repeat, 1, dim
         )
-        points_expanded_chunked = torch.chunk(points_expanded, num_classes, dim=0)
-        mins_expanded_chunked = torch.chunk(mins_expanded, num_classes, dim=0)
-        maxs_expanded_chunked = torch.chunk(maxs_expanded, num_classes, dim=0)
+        points_expanded_chunked = torch.chunk(points_expanded, chunk_size, dim=0)
+        mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
+        maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         inclusions = []
         for i in range(num_classes):
             lower_bound = (
@@ -470,8 +475,8 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
             binary_tensor = torch.clamp(sign_tensor, 0, 1)
             positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
             inclusions.append(positive_entries)
-        inclusions = torch.cat(inclusions, dim=0)
-        results.append(inclusions)
+        inclusion_results = torch.cat(inclusions, dim=0)
+        results.append(inclusion_results)
     dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
 
