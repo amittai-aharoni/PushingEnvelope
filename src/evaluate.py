@@ -51,6 +51,9 @@ def evaluate(dataset, task, model_name, embedding_size, best=True, split="test")
         ranking = compute_ranks(
             model, test_data, num_classes, nf, device, use_tqdm=True
         )
+        print(
+            f"Top 1: {ranking.top1}, Top 10: {ranking.top10}, Top 100: {ranking.top100} for {nf}"
+        )
         rankings.append(ranking)
 
     output = "\n".join(
@@ -169,7 +172,7 @@ def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
         maxs_expanded_chuncked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         points_chuncked = torch.chunk(points_expanded, chunk_size, dim=0)
         inclusions = []
-        for i in range(num_classes):
+        for i in range(len(mins_expanded_chuncked)):
             lower_bound = (
                 (points_chuncked[i] - mins_expanded_chuncked[i]).min(dim=3).values
             )
@@ -263,7 +266,7 @@ def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
         mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
         maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         inclusions = []
-        for i in range(num_classes):
+        for i in range(len(mins_expanded_chunked)):
             lower_bound = (
                 (points_expanded_chunked[i] - mins_expanded_chunked[i])
                 .min(dim=3)
@@ -459,7 +462,7 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
         mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
         maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         inclusions = []
-        for i in range(num_classes):
+        for i in range(len(mins_expanded_chunked)):
             lower_bound = (
                 (points_expanded_chunked[i] - mins_expanded_chunked[i])
                 .min(dim=3)
