@@ -112,6 +112,9 @@ class Multiboxes:
         dim = multiboxes.min.shape[2]
         number_of_points = points.shape[0]
 
+        if boxes_amount == 0:
+            return torch.zeros(batch_size, number_of_points, dim).to(device)
+
         # For each multibox, we calculate the inclusion of each point
         points = (points.unsqueeze(1).expand(batch_size, number_of_points, 1, dim)).to(
             device
