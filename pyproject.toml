@@ -25,6 +25,7 @@ mypy = "^1.10.0"
 shapely = "^2.0.4"
 torchvision = "^0.18.0"
 torchaudio = "^2.3.0"
+scipy = "^1.14.0"
 
 
 [tool.poetry.group.dev.dependencies]

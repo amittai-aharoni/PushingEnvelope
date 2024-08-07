@@ -2,7 +2,7 @@ import torch
 import torch.optim as optim
 from tqdm import trange
 
-from src.family.family_data import load_data
+from src.family.incompleteness_result_data import load_data
 from src.model.BoxSquaredEL import BoxSquaredEL
 from src.model.MultiBoxEL import MultiBoxEL
 
@@ -18,6 +18,7 @@ if MODEL == "boxsqel":
         2,
         len(classes),
         len(relations),
+        num_individuals=len(individuals),
         margin=0,
         reg_factor=1,
         num_neg=0,
@@ -28,9 +29,9 @@ if MODEL == "multiboxel":
         device,
         4,
         len(classes),
-        num_boxes_per_class=2,
+        num_boxes_per_class=3,
         num_roles=len(relations),
-        # num_individuals=len(individuals),
+        num_individuals=len(individuals),
     )
 # model = Elbe(device, classes,
 # len(relations), embedding_dim=2,
@@ -41,7 +42,7 @@ model = model.to(device)
 model.train()
 if MODEL == "multiboxel":
     # we discovered that multiboxel converges to its best solution after 200 epochs
-    num_epochs = 200
+    num_epochs = 35
 if MODEL == "boxsqel":
     num_epochs = 300
 pbar = trange(num_epochs)
@@ -52,4 +53,4 @@ for epoch in pbar:
     loss.backward()
     optimizer.step()
 
-model.save(f"out/{model.name}")
+model.save(f"out_incompleteness/{model.name}")

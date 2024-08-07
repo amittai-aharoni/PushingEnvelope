@@ -14,8 +14,8 @@ from src.utils.data_loader import DataLoader
 from src.utils.utils import get_device
 
 logging.basicConfig(level=logging.INFO)
-num_points = 50
-number_chunks = 10
+num_points = 5
+number_chunks = 2
 
 
 def main():
@@ -45,7 +45,12 @@ def evaluate(dataset, task, model_name, embedding_size, best=True, split="test")
     else:
         raise ValueError("Unknown split.")
 
-    nfs = ["nf1", "nf2", "nf3", "nf4"] if task == "prediction" else ["nf1"]
+    nfs = [
+        "nf1",
+        "nf2",
+        "nf3",
+        "nf4"
+    ] if task == "prediction" else ["nf1"]
     rankings = []
     for nf in nfs:
         ranking = compute_ranks(
@@ -122,14 +127,18 @@ def compute_ranks(
         elif isinstance(model, MultiBoxELLoadedModel):
             fun += "_multiboxel"
 
-        batch_ranks = globals()[fun](
-            model, batch_data, current_batch_size, device
-        )  # call the correct function based on NF
-        top1 += (batch_ranks <= 1).sum()
-        top10 += (batch_ranks <= 10).sum()
-        top100 += (batch_ranks <= 100).sum()
-        print(f"Top 1: {top1}, Top 10: {top10}, Top 100: {top100} for {nf}")
-        ranks += batch_ranks.tolist()
+        try:
+            batch_ranks = globals()[fun](
+                model, batch_data, current_batch_size, device
+            )  # call the correct function based on NF
+            top1 += (batch_ranks <= 1).sum()
+            top10 += (batch_ranks <= 10).sum()
+            top100 += (batch_ranks <= 100).sum()
+            print(f"Top 1: {top1}, Top 10: {top10}, Top 100: {top100} for {nf}")
+            ranks += batch_ranks.tolist()
+        except Exception as e:
+            logging.error(f"Error computing ranks for batch {i}: {e}")
+            continue
 
     ranks_dict = Counter(ranks)
     auc = compute_rank_roc(ranks_dict, num_classes)
@@ -156,37 +165,84 @@ def compute_nf1_ranks_multiboxel(model, batch_data, batch_size, device=None):
     batch_mins = class_multiboxes.min[batch_data[:, 0]]
     batch_maxs = class_multiboxes.max[batch_data[:, 0]]
 
-    results = []
-    for i in tqdm(range(batch_size)):
-        min = batch_mins[i]
-        max = batch_maxs[i]
-        points = generate_uniform_points(min, max, num_points, device=device)
-        points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
-        mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
-            num_classes, num_of_boxes, 1, dim
-        )
-        maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
-            num_classes, num_of_boxes, 1, dim
-        )
-        mins_expanded_chuncked = torch.chunk(mins_expanded, chunk_size, dim=0)
-        maxs_expanded_chuncked = torch.chunk(maxs_expanded, chunk_size, dim=0)
-        points_chuncked = torch.chunk(points_expanded, chunk_size, dim=0)
+    points = generate_uniform_points(batch_mins, batch_maxs, num_points, device=device)
+    points_expanded = points.unsqueeze(1).repeat(1, num_classes, 1, 1, 1)
+    mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
+        num_classes, num_of_boxes, 1, dim
+    )
+    maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
+        num_classes, num_of_boxes, 1, dim
+    )
+    if num_classes > 20:
+        chunk_size = 20
+        points_expanded_chunked = torch.chunk(points_expanded, chunk_size, dim=0)
+        mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
+        maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         inclusions = []
-        for i in range(len(mins_expanded_chuncked)):
+        for i in tqdm(range(len(mins_expanded_chunked))):
             lower_bound = (
-                (points_chuncked[i] - mins_expanded_chuncked[i]).min(dim=3).values
+                (points_expanded_chunked[i] - mins_expanded)
+                .min(dim=4)
+                .values
             )
             upper_bound = (
-                (maxs_expanded_chuncked[i] - points_chuncked[i]).min(dim=3).values
+                (maxs_expanded - points_expanded_chunked[i])
+                .min(dim=4)
+                .values
             )
             inclusion = torch.min(lower_bound, upper_bound)
             sign_tensor = torch.sign(inclusion)
             binary_tensor = torch.clamp(sign_tensor, 0, 1)
-            positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+            positive_entries = binary_tensor.sum(dim=3).sum(dim=2)
             inclusions.append(positive_entries)
         inclusion_results = torch.cat(inclusions, dim=0)
-        results.append(inclusion_results)
-    dists = torch.stack(results)
+        dists = inclusion_results
+    else:
+        lower_bound = (
+            (points_expanded - mins_expanded).min(dim=4).values
+        )
+        upper_bound = (
+            (maxs_expanded - points_expanded).min(dim=4).values
+        )
+        inclusion = torch.min(lower_bound, upper_bound)
+        sign_tensor = torch.sign(inclusion)
+        binary_tensor = torch.clamp(sign_tensor, 0, 1)
+        dists = binary_tensor.sum(dim=3).sum(dim=2)
+    # results = []
+    # for i in tqdm(range(batch_size)):
+    #     min = batch_mins[i]
+    #     max = batch_maxs[i]
+    #     points = generate_uniform_points(min, max, num_points, device=device)
+    #     points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
+    #     lower_bound = (
+    #         (points_expanded - mins_expanded).min(dim=4).values
+    #     )
+    #     upper_bound = (
+    #         (maxs_expanded - points_expanded).min(dim=4).values
+    #     )
+    #     inclusion = torch.min(lower_bound, upper_bound)
+    #     sign_tensor = torch.sign(inclusion)
+    #     binary_tensor = torch.clamp(sign_tensor, 0, 1)
+    #     dists = binary_tensor.sum(dim=3).sum(dim=2)
+    #     mins_expanded_chuncked = torch.chunk(mins_expanded, chunk_size, dim=0)
+    #     maxs_expanded_chuncked = torch.chunk(maxs_expanded, chunk_size, dim=0)
+    #     points_chuncked = torch.chunk(points_expanded, chunk_size, dim=0)
+    #     inclusions = []
+    #     for j in range(len(mins_expanded_chuncked)):
+    #         lower_bound = (
+    #             (points_chuncked[j] - mins_expanded_chuncked[j]).min(dim=3).values
+    #         )
+    #         upper_bound = (
+    #             (maxs_expanded_chuncked[j] - points_chuncked[j]).min(dim=3).values
+    #         )
+    #         inclusion = torch.min(lower_bound, upper_bound)
+    #         sign_tensor = torch.sign(inclusion)
+    #         binary_tensor = torch.clamp(sign_tensor, 0, 1)
+    #         positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+    #         inclusions.append(positive_entries)
+    #     inclusion_results = torch.cat(inclusions, dim=0)
+    #     results.append(inclusion_results)
+    # dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 1])
 
@@ -213,7 +269,7 @@ def compute_nf1_ranks_boxel(model, batch_data, batch_size, device=None):
     return dists_to_ranks(dists, batch_data[:, 1])
 
 
-def compute_nf2_ranks(model, batch_data, batch_size):
+def compute_nf2_ranks(model, batch_data, batch_size, device=None):
     class_boxes = model.get_boxes(model.class_embeds)
     centers = class_boxes.centers
     c_boxes = class_boxes[batch_data[:, 0]]
@@ -246,45 +302,100 @@ def compute_nf2_ranks_multiboxel(model, batch_data, batch_size, device=None):
     intersection = Multiboxes.intersect(
         c_multiboxes, d_multiboxes, device, suspicious=False
     )
+    num_boxes_intersection = intersection.min.shape[1]
     batch_mins = intersection.min
     batch_maxs = intersection.max
-    results = []
-    for i in tqdm(range(batch_size)):
-        min = batch_mins[i]
-        max = batch_maxs[i]
-        points = generate_uniform_points(min, max, num_points, device=device)
-        points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
-        num_boxes_intersection = batch_mins.shape[1]
-        boxes_repeat = num_boxes_intersection // num_of_boxes
-        mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
-            num_classes, boxes_repeat, 1, dim
+
+    class_min = class_multiboxes.min
+    class_max = class_multiboxes.max
+    if num_boxes_intersection - num_of_boxes > 0:
+        zeros_tensor = torch.zeros(num_classes, num_boxes_intersection - num_of_boxes, dim).to(
+            device
         )
-        maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
-            num_classes, boxes_repeat, 1, dim
-        )
+        num_of_boxes = num_boxes_intersection
+        class_min = torch.cat([class_min, zeros_tensor], dim=1)
+        class_max = torch.cat([class_max, zeros_tensor], dim=1)
+
+    points = generate_uniform_points(batch_mins, batch_maxs, num_points, device=device)
+    points_expanded = points.unsqueeze(1).repeat(1, num_classes, 1, 1, 1)
+    mins_expanded = class_min.unsqueeze(2).expand(
+        num_classes, num_of_boxes, 1, dim
+    )
+    maxs_expanded = class_max.unsqueeze(2).expand(
+        num_classes, num_of_boxes, 1, dim
+    )
+
+    if num_of_boxes > 20:
+        chunk_size = 20
         points_expanded_chunked = torch.chunk(points_expanded, chunk_size, dim=0)
-        mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
-        maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         inclusions = []
-        for i in range(len(mins_expanded_chunked)):
+        for i in tqdm(range(len(points_expanded_chunked))):
             lower_bound = (
-                (points_expanded_chunked[i] - mins_expanded_chunked[i])
-                .min(dim=3)
+                (points_expanded_chunked[i] - mins_expanded)
+                .min(dim=4)
                 .values
             )
             upper_bound = (
-                (maxs_expanded_chunked[i] - points_expanded_chunked[i])
-                .min(dim=3)
+                (maxs_expanded - points_expanded_chunked[i])
+                .min(dim=4)
                 .values
             )
             inclusion = torch.min(lower_bound, upper_bound)
             sign_tensor = torch.sign(inclusion)
             binary_tensor = torch.clamp(sign_tensor, 0, 1)
-            positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+            positive_entries = binary_tensor.sum(dim=3).sum(dim=2)
             inclusions.append(positive_entries)
         inclusion_results = torch.cat(inclusions, dim=0)
-        results.append(inclusion_results)
-    dists = torch.stack(results)
+        dists = inclusion_results
+    else:
+        lower_bound = (
+            (points_expanded - mins_expanded).min(dim=4).values
+        )
+        upper_bound = (
+            (maxs_expanded - points_expanded).min(dim=4).values
+        )
+        inclusion = torch.min(lower_bound, upper_bound)
+        sign_tensor = torch.sign(inclusion)
+        binary_tensor = torch.clamp(sign_tensor, 0, 1)
+        dists = binary_tensor.sum(dim=3).sum(dim=2)
+
+    # results = []
+    # for i in tqdm(range(batch_size)):
+    #     min = batch_mins[i]
+    #     max = batch_maxs[i]
+    #     points = generate_uniform_points(min, max, num_points, device=device)
+    #     points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
+    #     num_boxes_intersection = batch_mins.shape[1]
+    #     boxes_repeat = num_boxes_intersection // num_of_boxes
+    #     mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
+    #         num_classes, boxes_repeat, 1, dim
+    #     )
+    #     maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
+    #         num_classes, boxes_repeat, 1, dim
+    #     )
+    #     points_expanded_chunked = torch.chunk(points_expanded, chunk_size, dim=0)
+    #     mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
+    #     maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
+    #     inclusions = []
+    #     for i in range(len(mins_expanded_chunked)):
+    #         lower_bound = (
+    #             (points_expanded_chunked[i] - mins_expanded_chunked[i])
+    #             .min(dim=3)
+    #             .values
+    #         )
+    #         upper_bound = (
+    #             (maxs_expanded_chunked[i] - points_expanded_chunked[i])
+    #             .min(dim=3)
+    #             .values
+    #         )
+    #         inclusion = torch.min(lower_bound, upper_bound)
+    #         sign_tensor = torch.sign(inclusion)
+    #         binary_tensor = torch.clamp(sign_tensor, 0, 1)
+    #         positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+    #         inclusions.append(positive_entries)
+    #     inclusion_results = torch.cat(inclusions, dim=0)
+    #     results.append(inclusion_results)
+    # dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 2])
 
@@ -367,45 +478,110 @@ def compute_nf3_ranks_multiboxel(model, batch_data, batch_size, device=None):
     existential_multiboxes = Multiboxes.get_existential(
         d_multiboxes, r_multiboxes, device, suspicious=False
     )
+
+    batch_mins = class_multiboxes.min[batch_data[:, 0]]
+    batch_maxs = class_multiboxes.max[batch_data[:, 0]]
+
     num_queries = existential_multiboxes.min.shape[0]
 
-    results = []
-    for i in tqdm(range(num_classes)):
-        min = class_multiboxes.min[i]
-        max = class_multiboxes.max[i]
-        points = generate_uniform_points(min, max, num_points, device=device)
-        points_expanded = points.unsqueeze(0).repeat(num_queries, 1, 1, 1)
-        num_existential_boxes = existential_multiboxes.min.shape[1]
-        boxes_repeat = num_existential_boxes // num_of_boxes
-        mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
-            num_queries, boxes_repeat, 1, dim
-        )
-        maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
-            num_queries, boxes_repeat, 1, dim
-        )
-        points_expanded_chunked = torch.chunk(points_expanded, num_queries, dim=0)
-        mins_expanded_chunked = torch.chunk(mins_expanded, num_queries, dim=0)
-        maxs_expanded_chunked = torch.chunk(maxs_expanded, num_queries, dim=0)
+    num_boxes_existential = existential_multiboxes.min.shape[1]
+    if num_boxes_existential - num_of_boxes > 0:
+        zeros_tensor = torch.zeros(
+            num_classes, num_boxes_existential - num_of_boxes, dim
+        ).to(device)
+        num_of_boxes = num_boxes_existential
+        batch_mins = torch.cat([class_multiboxes.min, zeros_tensor], dim=1)
+        batch_maxs = torch.cat([class_multiboxes.max, zeros_tensor], dim=1)
+    # if num_boxes_intersection - num_of_boxes > 0:
+    #     # Create a tensor of zeros with shape (23142, 132, 2)
+    #     zeros_tensor = torch.zeros(num_classes, num_boxes_intersection - num_of_boxes, dim).to(
+    #         device
+    #     )
+    #     class_min = torch.cat([class_min, zeros_tensor], dim=1)
+    #     class_max = torch.cat([class_max, zeros_tensor], dim=1)
+
+    mins_expanded = existential_multiboxes.min.unsqueeze(1).unsqueeze(3).expand(
+        num_queries, 1, num_of_boxes, 1, dim
+    )
+    maxs_expanded = existential_multiboxes.max.unsqueeze(1).unsqueeze(3).expand(
+        num_queries, 1, num_of_boxes, 1, dim
+    )
+    points = generate_uniform_points(batch_mins, batch_maxs, num_points, device=device)
+    points_expanded = points.unsqueeze(0).repeat(num_queries, 1, 1, 1, 1)
+    if num_of_boxes > 20:
+        chunk_size = 20
+        points_expanded_chunked = torch.chunk(points_expanded, chunk_size, dim=0)
+        mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
+        maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         inclusions = []
-        for i in range(num_queries):
+        for i in tqdm(range(len(mins_expanded_chunked))):
             lower_bound = (
                 (points_expanded_chunked[i] - mins_expanded_chunked[i])
-                .min(dim=3)
+                .min(dim=4)
                 .values
             )
             upper_bound = (
                 (maxs_expanded_chunked[i] - points_expanded_chunked[i])
-                .min(dim=3)
+                .min(dim=4)
                 .values
             )
             inclusion = torch.min(lower_bound, upper_bound)
             sign_tensor = torch.sign(inclusion)
             binary_tensor = torch.clamp(sign_tensor, 0, 1)
-            positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+            positive_entries = binary_tensor.sum(dim=3).sum(dim=2)
             inclusions.append(positive_entries)
         inclusion_results = torch.cat(inclusions, dim=0)
-        results.append(inclusion_results)
-    dists = torch.stack(results)
+        dists = inclusion_results
+        dists = dists[batch_data[:, 0]]
+    else:
+        lower_bound = (
+            (points_expanded - mins_expanded).min(dim=4).values
+        )
+        upper_bound = (
+            (maxs_expanded - points_expanded).min(dim=4).values
+        )
+        inclusion = torch.min(lower_bound, upper_bound)
+        sign_tensor = torch.sign(inclusion)
+        binary_tensor = torch.clamp(sign_tensor, 0, 1)
+        dists = binary_tensor.sum(dim=3).sum(dim=2)
+    # results = []
+    # for i in tqdm(range(num_classes)):
+    #     min = class_multiboxes.min[i]
+    #     max = class_multiboxes.max[i]
+    #     points = generate_uniform_points(min, max, num_points, device=device)
+    #     points_expanded = points.unsqueeze(0).repeat(num_queries, 1, 1, 1)
+    #     num_existential_boxes = existential_multiboxes.min.shape[1]
+    #     boxes_repeat = num_existential_boxes // num_of_boxes
+    #     mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
+    #         num_queries, boxes_repeat, 1, dim
+    #     )
+    #     maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
+    #         num_queries, boxes_repeat, 1, dim
+    #     )
+    #     points_expanded_chunked = torch.chunk(points_expanded, num_queries, dim=0)
+    #     mins_expanded_chunked = torch.chunk(mins_expanded, num_queries, dim=0)
+    #     maxs_expanded_chunked = torch.chunk(maxs_expanded, num_queries, dim=0)
+    #     inclusions = []
+    #     for i in range(num_queries):
+    #         lower_bound = (
+    #             (points_expanded_chunked[i] - mins_expanded_chunked[i])
+    #             .min(dim=3)
+    #             .values
+    #         )
+    #         upper_bound = (
+    #             (maxs_expanded_chunked[i] - points_expanded_chunked[i])
+    #             .min(dim=3)
+    #             .values
+    #         )
+    #         inclusion = torch.min(lower_bound, upper_bound)
+    #         sign_tensor = torch.sign(inclusion)
+    #         binary_tensor = torch.clamp(sign_tensor, 0, 1)
+    #         positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+    #         inclusions.append(positive_entries)
+    #     inclusion_results = torch.cat(inclusions, dim=0)
+    #     results.append(inclusion_results)
+    # dists = torch.stack(results)
+    dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
     return dists_to_ranks(dists, batch_data[:, 0])
 
 
@@ -444,43 +620,98 @@ def compute_nf4_ranks_multiboxel(model, batch_data, batch_size, device=None):
     )
     batch_mins = existential_multiboxes.min
     batch_maxs = existential_multiboxes.max
-    results = []
-    for i in tqdm(range(batch_size)):
-        min = batch_mins[i]
-        max = batch_maxs[i]
-        points = generate_uniform_points(min, max, num_points, device=device)
-        points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
-        num_boxes_intersection = batch_mins.shape[1]
-        boxes_repeat = num_boxes_intersection // num_of_boxes
-        mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
-            num_classes, boxes_repeat, 1, dim
-        )
-        maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
-            num_classes, boxes_repeat, 1, dim
-        )
+
+    class_mins = class_multiboxes.min
+    class_maxs = class_multiboxes.max
+    num_boxes_existential = existential_multiboxes.min.shape[1]
+    if num_boxes_existential - num_of_boxes > 0:
+        zeros_tensor = torch.zeros(
+            num_classes, num_boxes_existential - num_of_boxes, dim
+        ).to(device)
+        num_of_boxes = num_boxes_existential
+        class_mins = torch.cat([class_mins, zeros_tensor], dim=1)
+        class_maxs = torch.cat([class_maxs, zeros_tensor], dim=1)
+
+    points = generate_uniform_points(batch_mins, batch_maxs, num_points, device=device)
+    points_expanded = points.unsqueeze(1).repeat(1, num_classes, 1, 1, 1)
+    mins_expanded = class_mins.unsqueeze(2).expand(
+        num_classes, num_of_boxes, 1, dim
+    )
+    maxs_expanded = class_maxs.unsqueeze(2).expand(
+        num_classes, num_of_boxes, 1, dim
+    )
+    if num_of_boxes > 20:
+        chunk_size = 20
         points_expanded_chunked = torch.chunk(points_expanded, chunk_size, dim=0)
-        mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
-        maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
         inclusions = []
-        for i in range(len(mins_expanded_chunked)):
+        for i in tqdm(range(len(points_expanded_chunked))):
             lower_bound = (
-                (points_expanded_chunked[i] - mins_expanded_chunked[i])
-                .min(dim=3)
+                (points_expanded_chunked[i] - mins_expanded)
+                .min(dim=4)
                 .values
             )
             upper_bound = (
-                (maxs_expanded_chunked[i] - points_expanded_chunked[i])
-                .min(dim=3)
+                (maxs_expanded - points_expanded_chunked[i])
+                .min(dim=4)
                 .values
             )
             inclusion = torch.min(lower_bound, upper_bound)
             sign_tensor = torch.sign(inclusion)
             binary_tensor = torch.clamp(sign_tensor, 0, 1)
-            positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+            positive_entries = binary_tensor.sum(dim=3).sum(dim=2)
             inclusions.append(positive_entries)
         inclusion_results = torch.cat(inclusions, dim=0)
-        results.append(inclusion_results)
-    dists = torch.stack(results)
+        dists = inclusion_results
+    else:
+        lower_bound = (
+            (points_expanded - mins_expanded).min(dim=4).values
+        )
+        upper_bound = (
+            (maxs_expanded - points_expanded).min(dim=4).values
+        )
+        inclusion = torch.min(lower_bound, upper_bound)
+        sign_tensor = torch.sign(inclusion)
+        binary_tensor = torch.clamp(sign_tensor, 0, 1)
+        dists = binary_tensor.sum(dim=3).sum(dim=2)
+
+    #
+    # results = []
+    # for i in tqdm(range(batch_size)):
+    #     min = batch_mins[i]
+    #     max = batch_maxs[i]
+    #     points = generate_uniform_points(min, max, num_points, device=device)
+    #     points_expanded = points.unsqueeze(0).repeat(num_classes, 1, 1, 1)
+    #     num_boxes_intersection = batch_mins.shape[1]
+    #     boxes_repeat = num_boxes_intersection // num_of_boxes
+    #     mins_expanded = class_multiboxes.min.unsqueeze(2).expand(
+    #         num_classes, boxes_repeat, 1, dim
+    #     )
+    #     maxs_expanded = class_multiboxes.max.unsqueeze(2).expand(
+    #         num_classes, boxes_repeat, 1, dim
+    #     )
+    #     points_expanded_chunked = torch.chunk(points_expanded, chunk_size, dim=0)
+    #     mins_expanded_chunked = torch.chunk(mins_expanded, chunk_size, dim=0)
+    #     maxs_expanded_chunked = torch.chunk(maxs_expanded, chunk_size, dim=0)
+    #     inclusions = []
+    #     for i in range(len(mins_expanded_chunked)):
+    #         lower_bound = (
+    #             (points_expanded_chunked[i] - mins_expanded_chunked[i])
+    #             .min(dim=3)
+    #             .values
+    #         )
+    #         upper_bound = (
+    #             (maxs_expanded_chunked[i] - points_expanded_chunked[i])
+    #             .min(dim=3)
+    #             .values
+    #         )
+    #         inclusion = torch.min(lower_bound, upper_bound)
+    #         sign_tensor = torch.sign(inclusion)
+    #         binary_tensor = torch.clamp(sign_tensor, 0, 1)
+    #         positive_entries = binary_tensor.sum(dim=2).sum(dim=1)
+    #         inclusions.append(positive_entries)
+    #     inclusion_results = torch.cat(inclusions, dim=0)
+    #     results.append(inclusion_results)
+    # dists = torch.stack(results)
     dists.scatter_(1, batch_data[:, 0].reshape(-1, 1), torch.inf)  # filter out c <= c
 
     return dists_to_ranks(dists, batch_data[:, 2])

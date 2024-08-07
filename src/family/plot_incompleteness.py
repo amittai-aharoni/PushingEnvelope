@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as plticker
 import torch
 
-from src.family.family_data import load_data
+from src.family.incompleteness_result_data import load_data
 from src.model.loaded_models import LoadedModel
 
 matplotlib.rcParams["figure.dpi"] = 150
@@ -68,7 +68,7 @@ if MODEL == "multiboxel":
     embedding_size = 4
 else:
     embedding_size = 2
-model = LoadedModel.from_name(MODEL, f"out/{MODEL}", embedding_size=embedding_size, device=device, best=False)
+model = LoadedModel.from_name(MODEL, f"out_incompleteness/{MODEL}", embedding_size=embedding_size, device=device, best=False)
 if MODEL == "multiboxel":
     class_boxes = model.get_multiboxes(model.class_embeds)
 else:
@@ -88,14 +88,7 @@ colors = [b, o, g, r, p, y]
 pos_dict = defaultdict(lambda: "upper_left")
 pos_dict["Parent"] = "upper_right"
 pos_dict["Female"] = "lower_right"
-for i, c in enumerate([
-    "Parent",
-    "Male",
-    "Female",
-    "Father",
-    "Mother",
-    "Child"
-]):
+for i, c in enumerate(["A", "B", "C", "AB", "BC", "AC"]):
     if MODEL == "multiboxel":
         max, min = class_boxes.max[classes[c]], class_boxes.min[classes[c]]
         boxes_amount = max.shape[0]

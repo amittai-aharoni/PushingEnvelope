@@ -24,6 +24,7 @@ class BoxSquaredEL(nn.Module):
         num_neg: int = 2,
         batch_size: int = 512,
         vis_loss: bool = False,
+        wandb=None,
     ):
         """
         Args:
@@ -53,6 +54,7 @@ class BoxSquaredEL(nn.Module):
         self.num_neg = num_neg
         self.batch_size = batch_size
         self.vis_loss = vis_loss
+        self.wandb = wandb
 
         self.negative_sampling = True
 
@@ -225,15 +227,9 @@ class BoxSquaredEL(nn.Module):
         )
 
     def concept_assertion_loss(self, data):
-        (a_boxes,) = self.get_individual_boxes(data, 2)
-        a_bumps = self.individual_bumps(data[:, 2])
-        (c_boxes,) = self.get_class_boxes(data, 1)
-        c_bumps = self.bumps(data[:, 1])
-        head_boxes, tail_boxes = self.get_relation_boxes(data, 0)
-
-        dist1 = self.inclusion_loss(a_boxes.translate(c_bumps), head_boxes)
-        dist2 = self.inclusion_loss(c_boxes.translate(a_bumps), tail_boxes)
-        return (dist1 + dist2) / 2
+        (a_boxes,) = self.get_individual_boxes(data, 1)
+        (c_boxes,) = self.get_class_boxes(data, 0)
+        return self.inclusion_loss(a_boxes, c_boxes)
 
     def nf4_loss(self, nf4_data):
         (d_boxes,) = self.get_class_boxes(nf4_data, 2)
@@ -276,22 +272,38 @@ class BoxSquaredEL(nn.Module):
         loss = 0
 
         nf1_data = self.get_data_batch(train_data, "nf1")
-        loss += self.nf1_loss(nf1_data).square().mean()
+        nf1_loss = self.nf1_loss(nf1_data).square().mean()
+        if self.wandb:
+            self.wandb.log({f"nf1_loss": nf1_loss.sum()})
+        loss += nf1_loss
 
         if len(train_data["nf2"]) > 0:
             nf2_data = self.get_data_batch(train_data, "nf2")
-            loss += self.nf2_loss(nf2_data).square().mean()
+            nf2_loss = self.nf2_loss(nf2_data).square().mean()
+            if self.wandb:
+                self.wandb.log({f"nf2_loss": nf2_loss.sum()})
+            loss += nf2_loss
 
         nf3_data = self.get_data_batch(train_data, "nf3")
-        loss += self.nf3_loss(nf3_data).square().mean()
+        if nf3_data.shape[0] != 0:
+            nf3_loss = self.nf3_loss(nf3_data).square().mean()
+            if self.wandb:
+                self.wandb.log({f"nf3_loss": nf3_loss.sum()})
+            loss += nf3_loss
 
         if len(train_data["nf4"]) > 0:
             nf4_data = self.get_data_batch(train_data, "nf4")
-            loss += self.nf4_loss(nf4_data).square().mean()
+            nf4_loss = self.nf4_loss(nf4_data).square().mean()
+            if self.wandb:
+                self.wandb.log({f"nf4_loss": nf4_loss.sum()})
+            loss += nf4_loss
 
         if len(train_data["disjoint"]) > 0:
             disjoint_data = self.get_data_batch(train_data, "disjoint")
-            loss += self.nf2_disjoint_loss(disjoint_data).square().mean()
+            disjoint_loss = self.nf2_disjoint_loss(disjoint_data).square().mean()
+            if self.wandb:
+                self.wandb.log({f"disjoint_loss": disjoint_loss.sum()})
+            loss += disjoint_loss
 
         if self.num_neg > 0:
             neg_data = self.get_negative_sample_batch(train_data, "nf3_neg")
@@ -302,17 +314,20 @@ class BoxSquaredEL(nn.Module):
 
         if "abox" in train_data:
             abox = train_data["abox"]
-            ra_data = self.get_data_batch(abox, "role_assertions")
-            loss += self.role_assertion_loss(ra_data).square().mean()
+            if len(abox["role_assertions"]) > 0:
+                ra_data = self.get_data_batch(abox, "role_assertions")
+                loss += self.role_assertion_loss(ra_data).square().mean()
 
-            neg_data = self.get_negative_sample_batch(abox, "role_assertions_neg")
-            neg_loss1, neg_loss2 = self.role_assertion_neg_loss(neg_data)
-            loss += (self.neg_dist - neg_loss1).square().mean() + (
-                self.neg_dist - neg_loss2
-            ).square().mean()
+            if len(abox["role_assertions_neg"]) > 0:
+                neg_data = self.get_negative_sample_batch(abox, "role_assertions_neg")
+                neg_loss1, neg_loss2 = self.role_assertion_neg_loss(neg_data)
+                loss += (self.neg_dist - neg_loss1).square().mean() + (
+                    self.neg_dist - neg_loss2
+                ).square().mean()
 
-            ca_data = self.get_data_batch(abox, "concept_assertions")
-            loss += self.concept_assertion_loss(ca_data).square().mean()
+            if len(abox["concept_assertions"]) > 0:
+                ca_data = self.get_data_batch(abox, "concept_assertions")
+                loss += self.concept_assertion_loss(ca_data).square().mean()
 
         if "role_inclusion" in train_data:
             ri_data = self.get_data_batch(train_data, "role_inclusion")

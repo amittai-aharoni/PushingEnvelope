@@ -429,15 +429,10 @@ class MultiBoxEL(nn.Module):
         )
 
     def concept_assertion_loss(self, data):
-        (a_boxes,) = self.get_individual_multiboxes(data, 2)
-        a_bumps = self.individual_bumps(data[:, 2])
-        (c_boxes,) = self.get_class_multiboxes(data, 1)
-        c_bumps = self.bumps(data[:, 1])
-        head_boxes, tail_boxes = self.get_relation_multiboxes(data, 0)
+        (a_boxes,) = self.get_individual_multiboxes(data, 1)
+        (c_boxes,) = self.get_class_multiboxes(data, 0)
 
-        dist1 = self.inclusion_loss(a_boxes.translate(c_bumps), head_boxes)
-        dist2 = self.inclusion_loss(c_boxes.translate(a_bumps), tail_boxes)
-        return (dist1 + dist2) / 2
+        return self.inclusion_loss(a_boxes, c_boxes)
 
     def nf4_loss(self, nf4_data):
         """
@@ -524,10 +519,11 @@ class MultiBoxEL(nn.Module):
 
         if "abox" in train_data:
             abox = train_data["abox"]
-            ra_data = self.get_data_batch(abox, "role_assertions")
-            assertion_loss = self.role_assertion_loss(ra_data).square().mean()
-            print(f"Role assertion loss: {assertion_loss}")
-            loss = loss + assertion_loss
+            if len(abox["role_assertions"]) > 0:
+                ra_data = self.get_data_batch(abox, "role_assertions")
+                assertion_loss = self.role_assertion_loss(ra_data).square().mean()
+                print(f"Role assertion loss: {assertion_loss}")
+                loss = loss + assertion_loss
 
             # neg_data = self.get_negative_sample_batch(abox, "role_assertions_neg")
             # neg_loss1, neg_loss2 = self.role_assertion_neg_loss(neg_data)
@@ -535,12 +531,13 @@ class MultiBoxEL(nn.Module):
             #     self.neg_dist - neg_loss2
             # ).square().mean()
 
-            ca_data = self.get_data_batch(abox, "concept_assertions")
-            concept_assertion_loss = (
-                self.concept_assertion_loss(ca_data).square().mean()
-            )
-            print(f"Concept assertion loss: {concept_assertion_loss}")
-            loss = loss + concept_assertion_loss
+            if len(abox["concept_assertions"]) > 0:
+                ca_data = self.get_data_batch(abox, "concept_assertions")
+                concept_assertion_loss = (
+                    self.concept_assertion_loss(ca_data).square().mean()
+                )
+                print(f"Concept assertion loss: {concept_assertion_loss}")
+                loss = loss + concept_assertion_loss
 
         if "role_inclusion" in train_data and len(train_data["role_inclusion"]) > 0:
             ri_data = self.get_data_batch(train_data, "role_inclusion")

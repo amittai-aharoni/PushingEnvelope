@@ -2,8 +2,8 @@ import torch
 
 
 def load_data():
-    class_names = ["Father", "Mother", "Parent", "Child", "Male", "Female"]
-    individual_names = ["Mark", "Alice"]
+    class_names = ["A", "B", "C", "AB", "BC", "AC"]
+    individual_names = ["a", "b", "c"]
     relation_names = ["hasChild", "hasParent"]
 
     classes = {c: i for i, c in enumerate(class_names)}
@@ -11,32 +11,30 @@ def load_data():
     individuals = {i: j for j, i in enumerate(individual_names)}
 
     nf1 = [
-        ("Father", "Male"),
-        ("Mother", "Female"),
-        ("Mother", "Parent"),
-        ("Father", "Parent"),
+        ("A", "AB"),
+        ("B", "BC"),
+        ("A", "AC"),
+        ("B", "AC"),
+        ("C", "BC"),
+        ("C", "AC"),
     ]
     nf2 = [
-        ("Male", "Parent", "Father"),
-        ("Female", "Parent", "Mother")
+        ("AB", "BC", "B"),
     ]
     nf3 = [
-        ("Parent", "hasChild", "Child"),
-        ("Child", "hasParent", "Mother"),
-        ("Child", "hasParent", "Father"),
     ]
     disjoint = [
-        ("Male", "Female"),
-        ("Parent", "Child"),
-        ("Father", "Mother"),
+        ("A", "B"),
+        ("A", "C"),
+        ("B", "C"),
+        ("AB", "C"),
+        ("BC", "A"),
+        ("AC", "B"),
     ]
     concept_assertions = [
-        # ("Mark", "Father"),
-        # ("Alice", "Mother"),
-        # ("Mark", "Parent"),
-        # ("Alice", "Parent"),
-        # ("Mark", "Male"),
-        # ("Alice", "Female"),
+        ("a", "A"),
+        ("b", "B"),
+        ("c", "C"),
         ]
 
     data = {
@@ -46,11 +44,11 @@ def load_data():
         "nf4": [],
         "nf3_neg0": [],
         "disjoint": to_tensor(disjoint, classes, relations),
-        # "abox": {
-        #     "role_assertions": [],
-        #     "concept_assertions": to_tensor(concept_assertions, classes, relations, individuals=individuals, use_individuals=True),
-        #     "role_assertions_neg": []
-        # }
+        "abox": {
+            "role_assertions": [],
+            "concept_assertions": to_tensor(concept_assertions, classes, relations, individuals=individuals, use_individuals=True),
+            "role_assertions_neg": []
+        }
     }
     return data, classes, relations, individuals
 

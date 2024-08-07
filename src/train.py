@@ -22,9 +22,11 @@ from src.config import (
     PARAMS,
     PROJECT_NAME,
     NUM_BOXES_PER_CLASS,
-    DATA_CHUNKS,
+    DATA_CHUNKS, TORCH_SEED, NUMPY_SEED, MODEL,
 )
 from src.evaluate import compute_ranks, evaluate
+from src.model.BoxEL import BoxEL
+from src.model.BoxSquaredEL import BoxSquaredEL
 
 # from src.model.BoxSquaredEL import BoxSquaredEL
 from src.model.MultiBoxEL import MultiBoxEL
@@ -47,8 +49,8 @@ def main():
     )
     args = parser.parse_args()
 
-    torch.manual_seed(42)
-    np.random.seed(12)
+    torch.manual_seed(TORCH_SEED)
+    np.random.seed(NUMPY_SEED)
 
     if args.sweep_id is not None:
         wandb.agent(
@@ -102,32 +104,36 @@ def run(config: Optional[PARAMS], use_wandb: bool = True, split: str = "val"):
     # model = Elem(device, classes, len(relations), embedding_dim, margin=0.00)
     # model = EmELpp(device, classes, len(relations), embedding_dim, margin=0.05)
     # model = Elbe(device, classes, len(relations), embedding_dim, margin=0.05)
-    # model = BoxEL(device, classes, len(relations), embedding_dim)
     # model = AblationModel(device, embedding_dim, len(classes), len(relations),
     # margin=wandb.config.margin, neg_dist=wandb.config.neg_dist,
     # num_neg=num_neg)
-    # model = BoxSquaredEL(
-    #     device,
-    #     embedding_dim,
-    #     len(classes),
-    #     len(relations),
-    #     margin=wandb.config.margin,
-    #     neg_dist=wandb.config.neg_dist,
-    #     reg_factor=wandb.config.reg_factor,
-    #     num_neg=num_neg,
-    # )
-    model = MultiBoxEL(
-        device,
-        embedding_dim * 2,
-        len(classes),
-        num_boxes_per_class=NUM_BOXES_PER_CLASS,
-        num_roles=len(relations),
-        margin=wandb.config.margin,
-        neg_dist=wandb.config.neg_dist,
-        reg_factor=wandb.config.reg_factor,
-        num_neg=num_neg,
-        wandb=wandb,
-    )
+    if MODEL == "BoxSquaredEL":
+        model = BoxSquaredEL(
+            device,
+            embedding_dim,
+            len(classes),
+            len(relations),
+            margin=wandb.config.margin,
+            neg_dist=wandb.config.neg_dist,
+            reg_factor=wandb.config.reg_factor,
+            num_neg=num_neg,
+            wandb=wandb,
+        )
+    if MODEL == "MultiBoxEL":
+        model = MultiBoxEL(
+            device,
+            embedding_dim * 2,
+            len(classes),
+            num_boxes_per_class=NUM_BOXES_PER_CLASS,
+            num_roles=len(relations),
+            margin=wandb.config.margin,
+            neg_dist=wandb.config.neg_dist,
+            reg_factor=wandb.config.reg_factor,
+            num_neg=num_neg,
+            wandb=wandb,
+        )
+    if MODEL == "BoxEL":
+        model = BoxEL(device, classes, len(relations), embedding_dim, wandb=wandb,)
     wandb.config["model"] = model.name
 
     out_folder = f"data/{dataset}/{task}/{model.name}"

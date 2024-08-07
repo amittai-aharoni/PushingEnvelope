@@ -34,13 +34,14 @@ def l2_side_regularizer(box, log_scale: bool = True):
 
 
 class BoxEL(nn.Module):
-    def __init__(self, device, class_, relationNum, embedding_dim):
+    def __init__(self, device, class_, relationNum, embedding_dim, wandb=None,):
         super(BoxEL, self).__init__()
 
         min_init_value = [1e-4, 0.2]
         delta_init_value = [-0.1, 0]
         relation_init_value = [-0.1, 0.1]
         scaling_init_value = [0.9, 1.1]
+        self.wandb = wandb
         vocab_size = len(class_)
         min_embedding = self.init_concept_embedding(
             vocab_size, embedding_dim, min_init_value
@@ -82,6 +83,8 @@ class BoxEL(nn.Module):
         boxes1 = Box(nf1_min[:, 0, :], nf1_max[:, 0, :])
         boxes2 = Box(nf1_min[:, 1, :], nf1_max[:, 1, :])
         nf1_loss, nf1_reg_loss = self.nf1_loss(boxes1, boxes2)
+        if self.wandb:
+            self.wandb.log({f"nf1_loss": nf1_loss.sum()})
 
         if len(input["nf2"]) == 0:
             nf2_loss = nf2_reg_loss = torch.as_tensor(0)
@@ -96,6 +99,8 @@ class BoxEL(nn.Module):
             boxes2 = Box(nf2_min[:, 1, :], nf2_max[:, 1, :])
             boxes3 = Box(nf2_min[:, 2, :], nf2_max[:, 2, :])
             nf2_loss, nf2_reg_loss = self.nf2_loss(boxes1, boxes2, boxes3)
+            if self.wandb:
+                self.wandb.log({f"nf2_loss": nf2_loss.sum()})
 
         rand_index = np.random.choice(len(input["nf3"]), size=batch)
         nf3_data = input["nf3"][rand_index]
@@ -108,6 +113,8 @@ class BoxEL(nn.Module):
         boxes1 = Box(nf3_min[:, 0, :], nf3_max[:, 0, :])
         boxes2 = Box(nf3_min[:, 1, :], nf3_max[:, 1, :])
         nf3_loss, nf3_reg_loss = self.nf3_loss(boxes1, relation, scaling, boxes2)
+        if self.wandb:
+            self.wandb.log({f"nf3_loss": nf3_loss.sum()})
 
         if len(input["nf4"]) == 0:
             nf4_loss = nf4_reg_loss = torch.as_tensor(0)
@@ -123,6 +130,8 @@ class BoxEL(nn.Module):
             boxes1 = Box(nf4_min[:, 0, :], nf4_max[:, 0, :])
             boxes2 = Box(nf4_min[:, 1, :], nf4_max[:, 1, :])
             nf4_loss, nf4_reg_loss = self.nf4_loss(relation, scaling, boxes1, boxes2)
+            if self.wandb:
+                self.wandb.log({f"nf4_loss": nf4_loss.sum()})
 
         if len(input["disjoint"]) == 0:
             disjoint_loss = disjoint_reg_loss = torch.as_tensor(0)
@@ -136,6 +145,8 @@ class BoxEL(nn.Module):
             boxes1 = Box(disjoint_min[:, 0, :], disjoint_max[:, 0, :])
             boxes2 = Box(disjoint_min[:, 1, :], disjoint_max[:, 1, :])
             disjoint_loss, disjoint_reg_loss = self.disjoint_loss(boxes1, boxes2)
+            if self.wandb:
+                self.wandb.log({f"disjoint_loss": disjoint_loss.sum()})
 
         if len(input["nf3_neg0"]) == 0:
             neg_loss = neg_reg_loss = torch.as_tensor(0)
@@ -153,6 +164,8 @@ class BoxEL(nn.Module):
             neg_loss, neg_reg_loss = self.nf3_neg_loss(
                 boxes1, relation, scaling, boxes2
             )
+            if self.wandb:
+                self.wandb.log({f"neg_loss": neg_loss.sum()})
 
         total_loss = [
             nf1_loss.sum()
